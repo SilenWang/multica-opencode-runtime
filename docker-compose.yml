@@ -7,17 +7,11 @@ services:
       dockerfile: Dockerfile
     container_name: multica-runtime
     volumes:
-      - ./data/multica:/home/multica/.multica
-      - ./data/opencode:/home/multica/.opencode
+      - ./data/multica_workspaces:/home/multica/multica_workspaces
+      - ${HOME}/.opencode:/home/multica/.opencode
     environment:
-      - MULTICA_HOME=/home/multica/.multica
       - OPENCODE_CONFIG_DIR=/home/multica/.opencode
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]
-    tty: true
     stdin_open: true
+    tty: true
+    devices:
+      - /dev/dri:/dev/dri
