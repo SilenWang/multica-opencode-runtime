@@ -8,7 +8,7 @@ RUN apt-get update && apt-get install -y \
 
 RUN curl -fsSL https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.sh | bash
 
-RUN useradd -m -s /bin/bash -u 1000 -G sudo multica
+RUN useradd -m -s /bin/bash multica
 
 USER multica
 WORKDIR /home/multica
