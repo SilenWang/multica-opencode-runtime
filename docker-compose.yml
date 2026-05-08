@@ -1,0 +1,23 @@
+version: "3.8"
+
+services:
+  multica-runtime:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: multica-runtime
+    volumes:
+      - ./data/multica:/home/multica/.multica
+      - ./data/opencode:/home/multica/.opencode
+    environment:
+      - MULTICA_HOME=/home/multica/.multica
+      - OPENCODE_CONFIG_DIR=/home/multica/.opencode
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    tty: true
+    stdin_open: true
