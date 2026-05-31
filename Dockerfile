@@ -21,6 +21,10 @@ RUN curl -fsSL https://raw.githubusercontent.com/multica-ai/multica/main/scripts
 RUN pixi global install -c https://prefix.dev/sylens opencode \
     && mkdir -p /home/ubuntu/.local/share/opencode
 
+COPY scripts/entrypoint.sh /entrypoint.sh
+
 ENV PATH="/home/ubuntu/.pixi/bin:${PATH}"
+
+ENTRYPOINT ["/bin/bash", "/entrypoint.sh"]
 
 CMD ["bash"]
