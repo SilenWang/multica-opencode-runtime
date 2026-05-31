@@ -1,3 +1,4 @@
 data
 !data/multica_workspaces/.gitkeep
+!data/multica_daemon/.gitkeep
 .env

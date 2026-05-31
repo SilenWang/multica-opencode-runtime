@@ -5,11 +5,13 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: multica-runtime-dev
+    container_name: ${CONTAINER_NAME}
+    hostname: ${CONTAINER_NAME}
     env_file:
       - .env
     volumes:
       - ./data/multica_workspaces:/home/ubuntu/multica_workspaces
+      - ./data/multica_daemon:/home/ubuntu/.multica
       - ${HOME}/.local/share/opencode/auth.json:/home/ubuntu/.local/share/opencode/auth.json
     deploy:
       resources:
