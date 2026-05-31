@@ -1,2 +1,5 @@
 data
 !data/multica_workspaces/.gitkeep
+!data/multica/.gitkeep
+!data/opencode/.gitkeep
+!data/gh/.gitkeep

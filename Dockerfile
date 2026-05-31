@@ -19,7 +19,9 @@ WORKDIR /home/ubuntu
 
 # 创建目录否则映射进来会变成root
 RUN pixi global install -c https://prefix.dev/sylens opencode \
-    && mkdir -p /home/ubuntu/.local/share/opencode
+    && mkdir -p /home/ubuntu/.local/share/opencode \
+    && mkdir -p /home/ubuntu/.multica \
+    && mkdir -p /home/ubuntu/.config/gh
 
 ENV PATH="/home/ubuntu/.pixi/bin:${PATH}"
 
