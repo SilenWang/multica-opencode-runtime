@@ -1,4 +1,7 @@
-data
+data/multica_workspaces/*
 !data/multica_workspaces/.gitkeep
+
+data/multica_daemon/*
 !data/multica_daemon/.gitkeep
+
 .env
