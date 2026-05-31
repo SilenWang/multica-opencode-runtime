@@ -7,8 +7,6 @@ RUN apt-get update && apt-get install -y \
     gh \
     && rm -rf /var/lib/apt/lists/*
 
-RUN curl -fsSL https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.sh | bash
-
 # 给unubtu sudo权限，方便后续agent可能要自己安装一些工具
 RUN echo "ubuntu ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/ubuntu \
     && chmod 0440 /etc/sudoers.d/ubuntu
@@ -16,6 +14,8 @@ RUN echo "ubuntu ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/ubuntu \
 # 使用ubuntu，因为1000已经被使用 
 USER ubuntu
 WORKDIR /home/ubuntu
+
+RUN curl -fsSL https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.sh | bash
 
 # 创建目录否则映射进来会变成root
 RUN pixi global install -c https://prefix.dev/sylens opencode \
