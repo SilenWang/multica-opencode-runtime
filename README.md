@@ -24,35 +24,27 @@ docker-compose up -d
 
 ## 首次配置（重要）
 
-容器启动后，需要自行进入容器内部执行以下两个命令来完成配置。
+根据`.env.example`填写`.env`，`MULTICA_SERVER_URL`非自部署无需修改。
 
-### 1. 配置 multica 服务连接
+multica 登录需要在`.env`文件中设置`MULTICA_TOKEN`，需要在multica工作区的`API TOKEN`项目手动生成。TOKEN本身也和运行时编码绑定，手动生成和保存也有助于回复运行时容器。
 
-```bash
-multica setup
-```
-
-- 注意：需要手动打开浏览器使用链接开始验证，浏览器会跳转到一个 localhost 链接，再手动复制链接，容器内 curl 访问这个链接以完成认证。
-
-### 2. 登录 GitHub
-
-```bash
-gh auth login
-```
-
-- 注意：程序默认会尝试自行启动浏览器来进行认证，容器内并无浏览器，请手动粘贴链接到浏览器以完成认证。
-
-完成以上配置后，即可正常使用 multica 和 opencode 进行开发工作。
-
-## 进入容器
-
-```bash
-docker exec -it CONTAINER_ID /bin/bash
-```
+容器启动后需要登录github和multica，前者使用`docker logs YOU_CONTAINER_NAME_FOR_RUNTIME`来查看日志，获取github给的验证码，然后打开`https://github.com/login/device`进行认证。认证后权限与github网页端完全一致，不用额外进行privte项目和组织权限设置。
 
 ## 数据持久化
 
-compose 配置中设置了两项映射，以保留 agent 的 workspace 文件，同时使用宿主机的 opencode 认证文件，避免手动配置。
+compose 配置中设置了三项映射：
 
-- 工作空间数据：`./data/multica_workspaces` 映射到容器的 `/home/ubuntu/multica_workspaces`
-- 认证信息：`~/.local/share/opencode/auth.json` 映射到容器内对应位置
+- 以保留 agent 的 workspace 文件以及 multica 运行时设备信息
+    + 工作空间数据：`./data/multica_workspaces` 映射到容器的 `/home/ubuntu/multica_workspaces`
+    + 运行时认证信息：`./data/multica_daemon` 映射到容器的 `/home/ubuntu/.multica`
+
+- opencode 认证文件，避免手动配置。
+    + 认证信息：`~/.local/share/opencode/auth.json` 映射到容器内对应位置
+
+## 重置容器
+
+遇到agent将容器内软件损坏，或发生意外情况需要重置容器的情况，保持配置不变，`docker compose down -v && docker compose up -d`即可
+
+## 同时多运行时
+
+在不同目录克隆本项目，配置`.env`使用不同的`CONTAINER_NAME`，然后进行首次配置启动，即可在单机上开启不同的运行时
