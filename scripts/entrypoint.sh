@@ -5,7 +5,7 @@ set -e
 echo "准备设置Multica"
 
 # 1. Github登录
-# 环境变量有token，不需要额外登录
+echo -e "\n\n\n" | gh auth login --hostname github.com -w
 
 # 2. Multica 登录
 if [ -n "$MULTICA_TOKEN" ]; then
