@@ -2,19 +2,21 @@
 # 遇到错误立即停止运行
 set -e
 
+# 1. Multica 登录
 echo "准备设置Multica"
-
-# 1. Github登录
-echo -e "\n\n\n" | gh auth login --hostname github.com -w
-
-# 2. Multica 登录
 if [ -n "$MULTICA_TOKEN" ]; then
     echo "检测到 MULTICA_TOKEN 自动登录 mulitca 并启动"
+    multica config set server_url https://api.multica.ai
+    multica config set app_url https://multica.ai
     multica login --token ${MULTICA_TOKEN}
     multica daemon start
 fi
 
-# 3. 写入 opencode auth.json (DEEPSEEK_TOKEN)
+# 2. Github登录
+echo "准备设置 Github"
+echo -e "\n\n\n" | gh auth login --hostname github.com -w
+
+# 2. 写入 opencode auth.json (DEEPSEEK_TOKEN)
 if [ -n "$DEEPSEEK_TOKEN" ]; then
     echo "检测到 DEEPSEEK_TOKEN，写入 opencode auth.json"
     mkdir -p /home/ubuntu/.local/share/opencode
@@ -28,7 +30,7 @@ if [ -n "$DEEPSEEK_TOKEN" ]; then
 EOF
 fi
 
-# 4. 设置 cc
+# 3. 设置 cc
 if [ -n "$DEEPSEEK_TOKEN" ]; then
     echo "检测到 DEEPSEEK_TOKEN，写入 claude settings.json"
     mkdir -p /home/ubuntu/.claude
@@ -47,7 +49,6 @@ if [ -n "$DEEPSEEK_TOKEN" ]; then
 }
 EOF
 fi
-
 
 # 继续运行
 exec "$@"

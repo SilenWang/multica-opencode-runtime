@@ -26,7 +26,7 @@ RUN curl -fsSL https://claude.ai/install.sh | bash
     
 COPY scripts/entrypoint.sh /entrypoint.sh
 
-ENV PATH="/home/ubuntu/.pixi/bin:${PATH}"
+ENV PATH="/home/ubuntu/.local/bin:/home/ubuntu/.pixi/bin:${PATH}"
 
 ENTRYPOINT ["/bin/bash", "/entrypoint.sh"]
 
