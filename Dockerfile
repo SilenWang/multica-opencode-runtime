@@ -21,6 +21,14 @@ RUN curl -fsSL https://raw.githubusercontent.com/multica-ai/multica/main/scripts
 RUN pixi global install -c https://prefix.dev/sylens opencode \
     && mkdir -p /home/ubuntu/.local/share/opencode
 
+# 安装 cc-switch-cli (多 AI 编码助手管理工具) 并创建 cc 别名
+RUN curl -LO https://github.com/saladday/cc-switch-cli/releases/latest/download/cc-switch-cli-linux-x64-musl.tar.gz \
+    && tar -xzf cc-switch-cli-linux-x64-musl.tar.gz \
+    && chmod +x cc-switch \
+    && sudo mv cc-switch /usr/local/bin/cc-switch \
+    && sudo ln -sf /usr/local/bin/cc-switch /usr/local/bin/cc \
+    && rm -f cc-switch-cli-linux-x64-musl.tar.gz
+
 COPY scripts/entrypoint.sh /entrypoint.sh
 
 ENV PATH="/home/ubuntu/.pixi/bin:${PATH}"
