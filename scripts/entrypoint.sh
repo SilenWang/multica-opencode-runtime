@@ -13,5 +13,19 @@ if [ -n "$MULTICA_TOKEN" ]; then
     multica login --token ${MULTICA_TOKEN}
     multica daemon start
 fi
+# 3. 写入 opencode auth.json (DEEPSEEK_TOKEN)
+if [ -n "$DEEPSEEK_TOKEN" ]; then
+    echo "检测到 DEEPSEEK_TOKEN，写入 opencode auth.json"
+    mkdir -p /home/ubuntu/.local/share/opencode
+    cat > /home/ubuntu/.local/share/opencode/auth.json <<- EOF
+{
+  "deepseek": {
+    "type": "api",
+    "key": "${DEEPSEEK_TOKEN}"
+  }
+}
+EOF
+fi
+
 # 继续运行
 exec "$@"
