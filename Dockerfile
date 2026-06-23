@@ -24,9 +24,6 @@ RUN pixi global install -c https://prefix.dev/sylens opencode \
 # 安装 cc
 RUN curl -fsSL https://claude.ai/install.sh | bash
     
-# 安装 cc-switch-cli
-RUN curl -fsSL https://github.com/SaladDay/cc-switch-cli/releases/latest/download/install.sh | bash
-
 COPY scripts/entrypoint.sh /entrypoint.sh
 
 ENV PATH="/home/ubuntu/.pixi/bin:${PATH}"
