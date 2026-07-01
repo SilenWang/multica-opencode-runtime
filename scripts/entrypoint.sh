@@ -35,12 +35,13 @@ echo "$AUTH_JSON" > /home/ubuntu/.local/share/opencode/auth.json
 # 4. 设置 claude settings.json（根据 CLAUDE_PROVIDER 选择使用哪个 key）
 CLAUDE_PROVIDER="${CLAUDE_PROVIDER:-deepseek}"
 write_claude_settings() {
-    local base_url="$1" token="$2"
+    local base_url="$1" auth_token="$2" api_key="$3"
     cat > /home/ubuntu/.claude/settings.json <<- EOF
 {
   "env": {
     "ANTHROPIC_BASE_URL": "${base_url}",
-    "ANTHROPIC_AUTH_TOKEN": "${token}",
+    "ANTHROPIC_AUTH_TOKEN": "${auth_token}",
+    "ANTHROPIC_API_KEY": "${api_key}",
     "ANTHROPIC_MODEL": "${CLAUDE_OPUS_MODEL:-deepseek-v4-pro[1m]}",
     "ANTHROPIC_DEFAULT_OPUS_MODEL": "${CLAUDE_OPUS_MODEL:-deepseek-v4-pro[1m]}",
     "ANTHROPIC_DEFAULT_SONNET_MODEL": "${CLAUDE_SONNET_MODEL:-deepseek-v4-pro[1m]}",
@@ -55,7 +56,7 @@ EOF
 if [ "$CLAUDE_PROVIDER" = "opencode-go" ] && [ -n "$OPENCODE_GO_TOKEN" ]; then
     echo "检测到 CLAUDE_PROVIDER=opencode-go，写入 claude settings.json"
     mkdir -p /home/ubuntu/.claude
-    write_claude_settings "${OPENCODE_GO_BASE_URL:-https://api.opencode-go.com}" "${OPENCODE_GO_TOKEN}"
+    write_claude_settings "${OPENCODE_GO_BASE_URL:-https://opencode.ai/zen/go/}" "" "${OPENCODE_GO_TOKEN}"
 elif [ -n "$DEEPSEEK_TOKEN" ]; then
     echo "检测到 DEEPSEEK_TOKEN，写入 claude settings.json"
     mkdir -p /home/ubuntu/.claude
