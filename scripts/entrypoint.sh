@@ -62,7 +62,7 @@ elif [ -n "$DEEPSEEK_TOKEN" ]; then
     write_claude_settings "https://api.deepseek.com/anthropic" "${DEEPSEEK_TOKEN}"
 fi
 
-# 5. 设置 Codex bridge（将 DeepSeek API 接入 Codex CLI）
+# 5. 设置并启动 Codex bridge（将 DeepSeek API 接入 Codex CLI）
 setup_codex_bridge() {
     if ! command -v codex-deepseek-bridge &>/dev/null; then
         echo "WARNING: codex-deepseek-bridge not found. Codex bridge setup skipped."
@@ -70,8 +70,10 @@ setup_codex_bridge() {
     fi
     export DEEPSEEK_API_KEY="${DEEPSEEK_TOKEN}"
     if [ -n "${DEEPSEEK_API_KEY:-}" ] || [ -f "/home/ubuntu/.codex/codex-deepseek-bridge/deepseek-key" ]; then
-        echo "Configuring Codex bridge to use DeepSeek..."
+        echo "Configuring Codex bridge and starting daemon..."
         codex-deepseek-bridge setup --no-start --no-codex-app-install --no-upgrade-check 2>&1 || true
+        nohup codex-deepseek-bridge start > /home/ubuntu/.codex/codex-deepseek-bridge/bridge.stdout.log 2>&1 &
+        echo "Codex bridge daemon started on http://127.0.0.1:8787"
     else
         echo "WARNING: DEEPSEEK_TOKEN not set and no stored key found. Codex bridge not configured."
     fi
