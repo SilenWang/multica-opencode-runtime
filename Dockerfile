@@ -5,7 +5,18 @@ RUN apt-get update && apt-get install -y \
     git \
     sudo \
     gh \
+    xz-utils \
     && rm -rf /var/lib/apt/lists/*
+
+RUN curl -fsSL --connect-timeout 10 --max-time 120 \
+        https://nodejs.org/dist/v22.14.0/node-v22.14.0-linux-x64.tar.xz \
+        -o /tmp/node.tar.xz && \
+    tar -xJf /tmp/node.tar.xz -C /usr/local --strip-components=1 && \
+    rm /tmp/node.tar.xz && \
+    npm install -g @openai/codex && \
+    npm install -g @tencent-ai/codebuddy-code && \
+    npm install -g github:JetXu-LLM/codex-deepseek-bridge && \
+    npm cache clean --force
 
 # 给unubtu sudo权限，方便后续agent可能要自己安装一些工具
 RUN echo "ubuntu ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/ubuntu \

@@ -62,5 +62,84 @@ elif [ -n "$DEEPSEEK_TOKEN" ]; then
     write_claude_settings "https://api.deepseek.com/anthropic" "${DEEPSEEK_TOKEN}"
 fi
 
+# 5. 设置 Codex bridge（将 DeepSeek API 接入 Codex CLI）
+setup_codex_bridge() {
+    if ! command -v codex-deepseek-bridge &>/dev/null; then
+        echo "WARNING: codex-deepseek-bridge not found. Codex bridge setup skipped."
+        return
+    fi
+    export DEEPSEEK_API_KEY="${DEEPSEEK_TOKEN}"
+    if [ -n "${DEEPSEEK_API_KEY:-}" ] || [ -f "/home/ubuntu/.codex/codex-deepseek-bridge/deepseek-key" ]; then
+        echo "Configuring Codex bridge to use DeepSeek..."
+        codex-deepseek-bridge setup --no-start --no-codex-app-install --no-upgrade-check 2>&1 || true
+    else
+        echo "WARNING: DEEPSEEK_TOKEN not set and no stored key found. Codex bridge not configured."
+    fi
+}
+
+# 6. 生成 CodeBuddy models.json（接入 DeepSeek 官方 API 和 opencode go）
+setup_codebuddy_models() {
+    mkdir -p /home/ubuntu/.codebuddy
+
+    local deepseek_key="${DEEPSEEK_TOKEN:-}"
+    local opencode_go_key="${OPENCODE_GO_TOKEN:-}"
+    local opencode_go_url="${OPENCODE_GO_BASE_URL:-https://api.opencode-go.com}"
+
+    cat > /home/ubuntu/.codebuddy/models.json <<MODELS
+{
+  "models": [
+    {
+      "id": "deepseek-v4-pro",
+      "name": "DeepSeek V4 Pro",
+      "vendor": "DeepSeek",
+      "url": "https://api.deepseek.com/v1/chat/completions",
+      "apiKey": "${deepseek_key}",
+      "maxInputTokens": 128000,
+      "maxOutputTokens": 8192,
+      "supportsToolCall": true,
+      "supportsImages": false,
+      "supportsReasoning": true,
+      "relatedModels": {
+        "lite": "deepseek-v4-flash",
+        "reasoning": "deepseek-v4-pro"
+      }
+    },
+    {
+      "id": "deepseek-v4-flash",
+      "name": "DeepSeek V4 Flash",
+      "vendor": "DeepSeek",
+      "url": "https://api.deepseek.com/v1/chat/completions",
+      "apiKey": "${deepseek_key}",
+      "maxInputTokens": 128000,
+      "maxOutputTokens": 8192,
+      "supportsToolCall": true,
+      "supportsImages": false
+    },
+    {
+      "id": "opencode-go",
+      "name": "OpenCode Go",
+      "vendor": "OpenCode",
+      "url": "${opencode_go_url}/v1/chat/completions",
+      "apiKey": "${opencode_go_key}",
+      "maxInputTokens": 128000,
+      "maxOutputTokens": 8192,
+      "supportsToolCall": true,
+      "supportsImages": false
+    }
+  ],
+  "availableModels": [
+    "deepseek-v4-pro",
+    "deepseek-v4-flash",
+    "opencode-go"
+  ]
+}
+MODELS
+    chmod 600 /home/ubuntu/.codebuddy/models.json 2>/dev/null || true
+    echo "CodeBuddy models.json configured."
+}
+
+setup_codex_bridge
+setup_codebuddy_models
+
 # 继续运行
 exec "$@"
