@@ -12,10 +12,12 @@ RUN curl -fsSL --connect-timeout 10 --max-time 120 \
         https://nodejs.org/dist/v22.14.0/node-v22.14.0-linux-x64.tar.xz \
         -o /tmp/node.tar.xz && \
     tar -xJf /tmp/node.tar.xz -C /usr/local --strip-components=1 && \
-    rm /tmp/node.tar.xz && \
-    npm install -g @openai/codex && \
+    rm /tmp/node.tar.xz
+    
+RUN npm install -g @openai/codex && \
     npm install -g @tencent-ai/codebuddy-code && \
     npm install -g github:JetXu-LLM/codex-deepseek-bridge && \
+    npm install -g @anthropic-ai/claude-code && \
     npm cache clean --force
 
 # 给unubtu sudo权限，方便后续agent可能要自己安装一些工具
@@ -26,15 +28,10 @@ RUN echo "ubuntu ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/ubuntu \
 USER ubuntu
 WORKDIR /home/ubuntu
 
-RUN curl -fsSL https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.sh | bash
-
 # 创建目录否则映射进来会变成root
-RUN pixi global install -c https://prefix.dev/sylens opencode \
+RUN pixi global install -c https://prefix.dev/sylens opencode multica \
     && mkdir -p /home/ubuntu/.local/share/opencode
 
-# 安装 cc
-RUN curl -fsSL https://claude.ai/install.sh | bash
-    
 COPY scripts/entrypoint.sh /entrypoint.sh
 
 ENV PATH="/home/ubuntu/.local/bin:/home/ubuntu/.pixi/bin:${PATH}"
