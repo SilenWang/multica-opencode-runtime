@@ -62,23 +62,39 @@ elif [ -n "$DEEPSEEK_TOKEN" ]; then
     write_claude_settings "https://api.deepseek.com/anthropic" "${DEEPSEEK_TOKEN}"
 fi
 
-# 5. 设置并启动 Codex bridge（将 DeepSeek API 接入 Codex CLI）
-setup_codex_bridge() {
-    if ! command -v codex-deepseek-bridge &>/dev/null; then
-        echo "WARNING: codex-deepseek-bridge not found. Codex bridge setup skipped."
+# 5. 使用官方方式配置 Codex 接入 DeepSeek（config.toml + models.json，不依赖第三方 bridge）
+setup_codex_official() {
+    if [ -z "${DEEPSEEK_TOKEN:-}" ]; then
+        echo "WARNING: DEEPSEEK_TOKEN not set. Codex DeepSeek setup skipped."
         return
     fi
-    export DEEPSEEK_API_KEY="${DEEPSEEK_TOKEN}"
-    if [ -n "${DEEPSEEK_API_KEY:-}" ] || [ -f "/home/ubuntu/.codex/codex-deepseek-bridge/deepseek-key" ]; then
-        echo "Configuring Codex bridge and starting daemon..."
-        codex-deepseek-bridge setup --no-start --no-codex-app-install --no-upgrade-check 2>&1 || true
-        nohup codex-deepseek-bridge start > /home/ubuntu/.codex/codex-deepseek-bridge/bridge.stdout.log 2>&1 &
-        echo "Codex bridge daemon started on http://127.0.0.1:8787"
-    else
-        echo "WARNING: DEEPSEEK_TOKEN not set and no stored key found. Codex bridge not configured."
-    fi
-}
 
+    echo "Configuring Codex with official DeepSeek integration..."
+    mkdir -p /home/ubuntu/.codex
+
+    # Write models.json — exact catalog from the official DeepSeek setup script
+    # (includes base_instructions, required by Codex CLI >= 0.144.0)
+    cp /codex-models.json /home/ubuntu/.codex/models.json
+
+    # Write config.toml
+    cat > /home/ubuntu/.codex/config.toml << CODEX_CONFIG_TOML
+model = "deepseek-v4-flash"
+model_provider = "deepseek"
+preferred_auth_method = "apikey"
+forced_login_method = "api"
+model_reasoning_effort = "high"
+model_catalog_json = "~/.codex/models.json"
+
+[model_providers.deepseek]
+name = "deepseek"
+base_url = "https://api.deepseek.com/"
+wire_api = "responses"
+experimental_bearer_token = "${DEEPSEEK_TOKEN}"
+CODEX_CONFIG_TOML
+
+    chmod 600 /home/ubuntu/.codex/config.toml 2>/dev/null || true
+    echo "Codex official DeepSeek integration ready (model: deepseek-v4-flash, wire_api: responses)."
+}
 # 6. 生成 CodeBuddy models.json（接入 DeepSeek 官方 API 和 opencode go）
 setup_codebuddy_models() {
     mkdir -p /home/ubuntu/.codebuddy
@@ -140,7 +156,7 @@ MODELS
     echo "CodeBuddy models.json configured."
 }
 
-setup_codex_bridge
+setup_codex_official
 setup_codebuddy_models
 
 # 继续运行

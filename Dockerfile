@@ -16,7 +16,6 @@ RUN curl -fsSL --connect-timeout 10 --max-time 120 \
     
 RUN npm install -g @openai/codex && \
     npm install -g @tencent-ai/codebuddy-code && \
-    npm install -g github:JetXu-LLM/codex-deepseek-bridge && \
     npm install -g @anthropic-ai/claude-code && \
     npm cache clean --force
 
@@ -33,6 +32,7 @@ RUN pixi global install -c https://prefix.dev/sylens opencode multica \
     && mkdir -p /home/ubuntu/.local/share/opencode
 
 COPY scripts/entrypoint.sh /entrypoint.sh
+COPY scripts/codex-models.json /codex-models.json
 
 ENV PATH="/home/ubuntu/.local/bin:/home/ubuntu/.pixi/bin:${PATH}"
 
