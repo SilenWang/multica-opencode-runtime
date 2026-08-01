@@ -32,6 +32,7 @@ RUN pixi global install -c https://prefix.dev/sylens opencode multica \
     && mkdir -p /home/ubuntu/.local/share/opencode
 
 COPY scripts/entrypoint.sh /entrypoint.sh
+COPY scripts/codex-models.json /codex-models.json
 
 ENV PATH="/home/ubuntu/.local/bin:/home/ubuntu/.pixi/bin:${PATH}"
 
