@@ -1,4 +1,4 @@
-FROM ghcr.io/prefix-dev/pixi:0.67.2-noble-cuda-13.0.0
+FROM ghcr.io/prefix-dev/pixi:0.76.1-noble-cuda-13.0.0
 
 RUN apt-get update && apt-get install -y \
     curl \
