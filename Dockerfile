@@ -1,4 +1,4 @@
-FROM ghcr.io/prefix-dev/pixi:0.67.2-noble-cuda-13.0.0
+FROM ghcr.io/prefix-dev/pixi:0.76.1-noble-cuda-13.0.0
 
 RUN apt-get update && apt-get install -y \
     curl \
@@ -6,6 +6,8 @@ RUN apt-get update && apt-get install -y \
     sudo \
     gh \
     xz-utils \
+    docker.io \
+    docker-compose-v2 \
     && rm -rf /var/lib/apt/lists/*
 
 RUN curl -fsSL --connect-timeout 10 --max-time 120 \
@@ -22,6 +24,10 @@ RUN npm install -g @openai/codex && \
 # 给unubtu sudo权限，方便后续agent可能要自己安装一些工具
 RUN echo "ubuntu ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/ubuntu \
     && chmod 0440 /etc/sudoers.d/ubuntu
+
+# 将 ubuntu 用户加入 docker 组，使容器内的 ubuntu 用户可以直接操作 docker
+RUN if ! getent group docker > /dev/null 2>&1; then groupadd -r docker; fi \
+    && usermod -aG docker ubuntu
 
 # 使用ubuntu，因为1000已经被使用 
 USER ubuntu
