@@ -159,24 +159,5 @@ MODELS
 setup_codex_official
 setup_codebuddy_models
 
-# 7. 启用容器内 docker（挂载了宿主机 docker socket 时，容器内可直接调用 docker 创建/管理容器）
-if [ -S /var/run/docker.sock ]; then
-    echo "检测到 /var/run/docker.sock，启用容器内 Docker 支持"
-    DOCKER_GID=$(stat -c %g /var/run/docker.sock 2>/dev/null || echo "")
-    if [ -n "$DOCKER_GID" ] && [ "$DOCKER_GID" != "0" ]; then
-        DOCKER_GROUP=$(getent group "$DOCKER_GID" | cut -d: -f1)
-        if [ -z "$DOCKER_GROUP" ]; then
-            sudo groupadd -g "$DOCKER_GID" docker-host 2>/dev/null || true
-            DOCKER_GROUP=$(getent group "$DOCKER_GID" | cut -d: -f1)
-        fi
-        if [ -n "$DOCKER_GROUP" ]; then
-            sudo usermod -aG "$DOCKER_GROUP" ubuntu
-            echo "ubuntu 已加入 docker 组（gid=${DOCKER_GID}），容器内可直接调用 docker 而无需 sudo"
-            # 以新组重新执行，保证后续进程能直接访问 docker socket
-            exec sg "$DOCKER_GROUP" -c "$*"
-        fi
-    fi
-fi
-
 # 继续运行
 exec "$@"

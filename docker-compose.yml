@@ -9,6 +9,8 @@ services:
     hostname: ${CONTAINER_NAME}
     env_file:
       - .env
+    group_add:
+      - "${DOCKER_HOST_GID:-999}"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - ./data/multica_workspaces:/home/ubuntu/multica_workspaces

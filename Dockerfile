@@ -25,6 +25,10 @@ RUN npm install -g @openai/codex && \
 RUN echo "ubuntu ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/ubuntu \
     && chmod 0440 /etc/sudoers.d/ubuntu
 
+# 将 ubuntu 用户加入 docker 组，使容器内的 ubuntu 用户可以直接操作 docker
+RUN if ! getent group docker > /dev/null 2>&1; then groupadd -r docker; fi \
+    && usermod -aG docker ubuntu
+
 # 使用ubuntu，因为1000已经被使用 
 USER ubuntu
 WORKDIR /home/ubuntu
