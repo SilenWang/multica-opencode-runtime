@@ -9,6 +9,7 @@
 - 预装 opencode
 - 支持 GPU (DRI)
 - 已安装 GitHub CLI (gh)
+- 容器内可直接调用 docker（挂载宿主机 docker socket，支持容器内创建/管理容器）
 
 ## 构建命令
 
@@ -65,6 +66,14 @@ compose 配置中设置了三项映射：
 
 - opencode 认证文件，避免手动配置。
     + 认证信息：`~/.local/share/opencode/auth.json` 映射到容器内对应位置
+
+## 容器内使用 Docker
+
+compose 配置将宿主机 Docker socket（`/var/run/docker.sock`）挂载进运行时容器，并在镜像内预装 docker CLI（`docker.io`）与 `docker compose` 插件。
+
+容器启动时 entrypoint 会自动检测 socket，将 `ubuntu` 用户加入对应 docker 组，因此容器内 agent 可直接执行 `docker run`、`docker build`、`docker compose up` 等命令创建和管理容器，无需 sudo。
+
+> 注意：容器内创建的容器是宿主机上的同级容器，并非真正的嵌套运行时。如果宿主机没有 Docker 运行环境，需要先安装 Docker。
 
 ## 重置容器
 

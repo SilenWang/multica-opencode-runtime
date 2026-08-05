@@ -6,6 +6,8 @@ RUN apt-get update && apt-get install -y \
     sudo \
     gh \
     xz-utils \
+    docker.io \
+    docker-compose-v2 \
     && rm -rf /var/lib/apt/lists/*
 
 RUN curl -fsSL --connect-timeout 10 --max-time 120 \
