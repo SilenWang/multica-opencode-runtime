@@ -9,6 +9,7 @@
 - 预装 opencode
 - 支持 GPU (DRI)
 - 已安装 GitHub CLI (gh)
+- 预装 Reasonix（含 DeepSeek 官方 API 配置）
 
 ## 构建命令
 
@@ -54,6 +55,16 @@ multica 登录需要在`.env`文件中设置`MULTICA_TOKEN`，需要在multica�
 - `CLAUDE_SONNET_MODEL` — 默认 `deepseek-v4-pro[1m]`
 - `CLAUDE_HAIKU_MODEL` — 默认 `deepseek-v4-flash`
 - `CLAUDE_SUBAGENT_MODEL` — 默认 `deepseek-v4-flash`
+
+### Reasonix 模型设置
+
+容器启动时使用 `DEEPSEEK_TOKEN` 自动配置 Reasonix 直连 DeepSeek 官方 API，写入 `~/.reasonix/config.toml`（provider 配置）和 `~/.reasonix/.env`（密钥）。
+
+- 默认模型：`deepseek-v4-flash`（provider：`deepseek-flash` / `deepseek-pro`）
+- 可选覆盖默认模型名：
+  - `REASONIX_DEFAULT_MODEL` — 默认 `deepseek-v4-flash`
+
+使用方式：在任意项目目录运行 `reasonix` 开启交互会话，或 `reasonix run "<任务>"` 无界面执行。
 
 ## 数据持久化
 

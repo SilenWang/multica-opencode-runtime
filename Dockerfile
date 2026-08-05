@@ -17,6 +17,7 @@ RUN curl -fsSL --connect-timeout 10 --max-time 120 \
 RUN npm install -g @openai/codex && \
     npm install -g @tencent-ai/codebuddy-code && \
     npm install -g @anthropic-ai/claude-code && \
+    npm install -g reasonix && \
     npm cache clean --force
 
 # 给unubtu sudo权限，方便后续agent可能要自己安装一些工具

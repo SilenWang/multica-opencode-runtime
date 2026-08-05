@@ -156,8 +156,47 @@ MODELS
     echo "CodeBuddy models.json configured."
 }
 
+# 7. 配置 Reasonix 接入 DeepSeek 官方 API（config.toml + 全局 .env）
+setup_reasonix() {
+    if [ -z "${DEEPSEEK_TOKEN:-}" ]; then
+        echo "WARNING: DEEPSEEK_TOKEN not set. Reasonix DeepSeek setup skipped."
+        return
+    fi
+
+    echo "Configuring Reasonix with official DeepSeek integration..."
+    mkdir -p /home/ubuntu/.reasonix
+
+    # 全局密钥文件 <Reasonix home>/.env，provider 通过 api_key_env 引用
+    cat > /home/ubuntu/.reasonix/.env << REASONIX_ENV
+DEEPSEEK_API_KEY=${DEEPSEEK_TOKEN}
+REASONIX_ENV
+
+    # 用户级 config.toml（~/.reasonix/config.toml），直连 DeepSeek 官方 API
+    cat > /home/ubuntu/.reasonix/config.toml << REASONIX_CONFIG
+default_model = "${REASONIX_DEFAULT_MODEL:-deepseek-v4-flash}"
+
+[[providers]]
+name = "deepseek-flash"
+kind = "openai"
+base_url = "https://api.deepseek.com"
+model = "deepseek-v4-flash"
+api_key_env = "DEEPSEEK_API_KEY"
+
+[[providers]]
+name = "deepseek-pro"
+kind = "openai"
+base_url = "https://api.deepseek.com"
+model = "deepseek-v4-pro"
+api_key_env = "DEEPSEEK_API_KEY"
+REASONIX_CONFIG
+
+    chmod 600 /home/ubuntu/.reasonix/.env /home/ubuntu/.reasonix/config.toml 2>/dev/null || true
+    echo "Reasonix DeepSeek integration ready (default_model: ${REASONIX_DEFAULT_MODEL:-deepseek-v4-flash})."
+}
+
 setup_codex_official
 setup_codebuddy_models
+setup_reasonix
 
 # 继续运行
 exec "$@"
