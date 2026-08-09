@@ -59,11 +59,11 @@ multica 登录需要在`.env`文件中设置`MULTICA_TOKEN`，需要在multica�
 
 ### Reasonix 模型设置
 
-容器启动时使用 `DEEPSEEK_TOKEN` 自动配置 Reasonix 直连 DeepSeek 官方 API，写入 `~/.reasonix/config.toml`（provider 配置）和 `~/.reasonix/.env`（密钥）。
+容器启动时使用 `DEEPSEEK_TOKEN` 自动配置 Reasonix 直连 DeepSeek 官方 API，写入 `~/.reasonix/.env`（`DEEPSEEK_API_KEY`，配置在 GitHub 登录之前）和 `~/.reasonix/config.toml`（provider 配置）。
 
-- 默认模型：`deepseek-v4-flash`（provider：`deepseek-flash` / `deepseek-pro`）
+- 默认模型：`deepseek/deepseek-v4-flash`（provider：`deepseek`，模型：`deepseek-v4-flash` / `deepseek-v4-pro`）
 - 可选覆盖默认模型名：
-  - `REASONIX_DEFAULT_MODEL` — 默认 `deepseek-v4-flash`
+  - `REASONIX_DEFAULT_MODEL` — 默认 `deepseek/deepseek-v4-flash`
 
 使用方式：在任意项目目录运行 `reasonix` 开启交互会话，或 `reasonix run "<任务>"` 无界面执行。
 

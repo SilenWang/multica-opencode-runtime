@@ -2,7 +2,43 @@
 # 遇到错误立即停止运行
 set -e
 
-# 1. Multica 登录
+# 1. 配置 Reasonix（DEEPSEEK_API_KEY 写入 ~/.reasonix/.env + config.toml）
+setup_reasonix() {
+    if [ -z "${DEEPSEEK_TOKEN:-}" ]; then
+        echo "WARNING: DEEPSEEK_TOKEN not set. Reasonix DeepSeek setup skipped."
+        return
+    fi
+
+    echo "Configuring Reasonix with official DeepSeek integration..."
+    mkdir -p /home/ubuntu/.reasonix
+
+    # 全局密钥文件 <Reasonix home>/.env，provider 通过 api_key_env 引用
+    cat > /home/ubuntu/.reasonix/.env << REASONIX_ENV
+DEEPSEEK_API_KEY=${DEEPSEEK_TOKEN}
+REASONIX_ENV
+
+    # 用户级 config.toml（~/.reasonix/config.toml），直连 DeepSeek 官方 API
+    cat > /home/ubuntu/.reasonix/config.toml << REASONIX_CONFIG
+config_version = 1
+default_model = "${REASONIX_DEFAULT_MODEL:-deepseek/deepseek-v4-flash}"
+language = "zh"
+
+[[providers]]
+name        = "deepseek"
+kind        = "openai"
+base_url    = "https://api.deepseek.com"
+models      = ["deepseek-v4-flash", "deepseek-v4-pro"]
+default     = "deepseek-v4-flash"
+api_key_env = "DEEPSEEK_API_KEY"
+REASONIX_CONFIG
+
+    chmod 600 /home/ubuntu/.reasonix/.env /home/ubuntu/.reasonix/config.toml 2>/dev/null || true
+    echo "Reasonix DeepSeek integration ready (default_model: ${REASONIX_DEFAULT_MODEL:-deepseek/deepseek-v4-flash})."
+}
+
+setup_reasonix
+
+# 2. Multica 登录
 echo "准备设置Multica"
 if [ -n "$MULTICA_TOKEN" ]; then
     echo "检测到 MULTICA_TOKEN 自动登录 mulitca 并启动"
@@ -12,11 +48,11 @@ if [ -n "$MULTICA_TOKEN" ]; then
     multica daemon start
 fi
 
-# 2. Github登录
+# 3. Github登录
 echo "准备设置 Github"
 echo -e "\n\n\n" | gh auth login --hostname github.com -w
 
-# 3. 写入 opencode auth.json（所有可用的 provider key）
+# 4. 写入 opencode auth.json（所有可用的 provider key）
 echo "写入 opencode auth.json"
 mkdir -p /home/ubuntu/.local/share/opencode
 AUTH_JSON="{"
@@ -32,7 +68,7 @@ fi
 AUTH_JSON+="}"
 echo "$AUTH_JSON" > /home/ubuntu/.local/share/opencode/auth.json
 
-# 4. 设置 claude settings.json（根据 CLAUDE_PROVIDER 选择使用哪个 key）
+# 5. 设置 claude settings.json（根据 CLAUDE_PROVIDER 选择使用哪个 key）
 CLAUDE_PROVIDER="${CLAUDE_PROVIDER:-deepseek}"
 write_claude_settings() {
     local base_url="$1" token="$2"
@@ -62,7 +98,7 @@ elif [ -n "$DEEPSEEK_TOKEN" ]; then
     write_claude_settings "https://api.deepseek.com/anthropic" "${DEEPSEEK_TOKEN}"
 fi
 
-# 5. 使用官方方式配置 Codex 接入 DeepSeek（config.toml + models.json，不依赖第三方 bridge）
+# 6. 使用官方方式配置 Codex 接入 DeepSeek（config.toml + models.json，不依赖第三方 bridge）
 setup_codex_official() {
     if [ -z "${DEEPSEEK_TOKEN:-}" ]; then
         echo "WARNING: DEEPSEEK_TOKEN not set. Codex DeepSeek setup skipped."
@@ -95,7 +131,7 @@ CODEX_CONFIG_TOML
     chmod 600 /home/ubuntu/.codex/config.toml 2>/dev/null || true
     echo "Codex official DeepSeek integration ready (model: deepseek-v4-flash, wire_api: responses)."
 }
-# 6. 生成 CodeBuddy models.json（接入 DeepSeek 官方 API 和 opencode go）
+# 7. 生成 CodeBuddy models.json（接入 DeepSeek 官方 API 和 opencode go）
 setup_codebuddy_models() {
     mkdir -p /home/ubuntu/.codebuddy
 
@@ -156,47 +192,8 @@ MODELS
     echo "CodeBuddy models.json configured."
 }
 
-# 7. 配置 Reasonix 接入 DeepSeek 官方 API（config.toml + 全局 .env）
-setup_reasonix() {
-    if [ -z "${DEEPSEEK_TOKEN:-}" ]; then
-        echo "WARNING: DEEPSEEK_TOKEN not set. Reasonix DeepSeek setup skipped."
-        return
-    fi
-
-    echo "Configuring Reasonix with official DeepSeek integration..."
-    mkdir -p /home/ubuntu/.reasonix
-
-    # 全局密钥文件 <Reasonix home>/.env，provider 通过 api_key_env 引用
-    cat > /home/ubuntu/.reasonix/.env << REASONIX_ENV
-DEEPSEEK_API_KEY=${DEEPSEEK_TOKEN}
-REASONIX_ENV
-
-    # 用户级 config.toml（~/.reasonix/config.toml），直连 DeepSeek 官方 API
-    cat > /home/ubuntu/.reasonix/config.toml << REASONIX_CONFIG
-default_model = "${REASONIX_DEFAULT_MODEL:-deepseek-v4-flash}"
-
-[[providers]]
-name = "deepseek-flash"
-kind = "openai"
-base_url = "https://api.deepseek.com"
-model = "deepseek-v4-flash"
-api_key_env = "DEEPSEEK_API_KEY"
-
-[[providers]]
-name = "deepseek-pro"
-kind = "openai"
-base_url = "https://api.deepseek.com"
-model = "deepseek-v4-pro"
-api_key_env = "DEEPSEEK_API_KEY"
-REASONIX_CONFIG
-
-    chmod 600 /home/ubuntu/.reasonix/.env /home/ubuntu/.reasonix/config.toml 2>/dev/null || true
-    echo "Reasonix DeepSeek integration ready (default_model: ${REASONIX_DEFAULT_MODEL:-deepseek-v4-flash})."
-}
-
 setup_codex_official
 setup_codebuddy_models
-setup_reasonix
 
 # 继续运行
 exec "$@"
