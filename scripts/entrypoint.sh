@@ -23,6 +23,10 @@ config_version = 1
 default_model = "${REASONIX_DEFAULT_MODEL:-deepseek/deepseek-v4-flash}"
 language = "zh"
 
+# 容器内运行无需再隔离，关闭 sandbox，避免缺少 bwrap 导致 bash 命令被拦截
+[sandbox]
+bash = "off"
+
 [[providers]]
 name        = "deepseek"
 kind        = "openai"
