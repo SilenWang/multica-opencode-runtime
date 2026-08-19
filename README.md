@@ -7,8 +7,7 @@
 - 基于 pixi 官方镜像（`ghcr.io/prefix-dev/pixi:0.76.1-noble-cuda-13.0.0`，Ubuntu Noble + CUDA 13.0.0），预装 pixi 包管理器
 - 预装 multica（自动登录并启动 daemon）
 - 预装 opencode
-- 预装 Claude Code（`@anthropic-ai/claude-code`）
-- 预装 Codex CLI（`@openai/codex`，含官方 DeepSeek 集成配置）
+- 预装 Codex CLI（`@openai/codex`，含官方 DeepSeek 集成配置 + OmniRoute sol/luna 模型映射）
 - 预装 Reasonix（含 DeepSeek 官方 API 配置）
 - 预装 Node.js v22（`v22.14.0`）
 - 已安装 GitHub CLI (gh)
@@ -44,7 +43,7 @@ GitHub 需要在容器启动后手动认证：使用`docker logs YOU_CONTAINER_N
 - `OPENCODE_GO_TOKEN` — OpenCode Go API key
 - `OMNIROUTE_TOKEN` — OmniRoute 网关 API key（配合 `OMNIROUTE_BASE_URL`，默认 `http://192.168.8.228:20128`）
 
-这些 key 会被写入 opencode `auth.json`，并同时用于 Claude Code（`~/.claude/settings.json`）、Codex（`~/.codex/`）和 Reasonix（`~/.reasonix/`）的配置，各程序可根据需要选择使用。
+这些 key 会被写入 opencode `auth.json`，并同时用于 Codex（`~/.codex/`）和 Reasonix（`~/.reasonix/`）的配置，各程序可根据需要选择使用。
 
 ### OmniRoute 网关
 
@@ -52,33 +51,20 @@ GitHub 需要在容器启动后手动认证：使用`docker logs YOU_CONTAINER_N
 
 - `OMNIROUTE_TOKEN` — OmniRoute API key
 - `OMNIROUTE_BASE_URL` — 网关地址，默认 `http://192.168.8.228:20128`
-- **Codex** 默认接入 OmniRoute（`wire_api = "responses"`，模型 `deepseek-v4-flash`）
-- **Claude Code** 可选 `CLAUDE_PROVIDER=omniroute` 接入 OmniRoute（Anthropic 兼容根端点，不带 `/v1`）
+- **Codex** 默认接入 OmniRoute（`wire_api = "responses"`，默认模型 `deepseek-v4-flash`，即 luna）
 - **opencode** 将 OmniRoute 作为额外 provider（`omniroute/*`），默认模型仍为 `deepseek/deepseek-v4-flash`
 - 未设置 `OMNIROUTE_TOKEN` 时，Codex 回退为 DeepSeek 官方直连
-
-### Claude Code 提供商选择
-
-通过 `CLAUDE_PROVIDER` 环境变量选择 Claude Code 使用的后端 API：
-
-- `deepseek`（默认）— 使用 DeepSeek 的 Anthropic 兼容接口
-- `opencode-go` — 使用 OpenCode Go 的 API 接口（需设置 `OPENCODE_GO_TOKEN` 和 `OPENCODE_GO_BASE_URL`）
-- `omniroute` — 使用 OmniRoute 网关（需设置 `OMNIROUTE_TOKEN`，默认模型 `deepseek-v4-flash`）
-
-### 可选模型覆盖
-
-可在 `.env` 中设置以下变量覆盖 Claude Code 使用的默认模型名：
-
-- `CLAUDE_OPUS_MODEL` — 默认 `deepseek-v4-pro[1m]`
-- `CLAUDE_SONNET_MODEL` — 默认 `deepseek-v4-pro[1m]`
-- `CLAUDE_HAIKU_MODEL` — 默认 `deepseek-v4-flash`
-- `CLAUDE_SUBAGENT_MODEL` — 默认 `deepseek-v4-flash`
 
 ### Codex CLI（默认接入 OmniRoute）
 
 容器启动时优先使用 `OMNIROUTE_TOKEN` 配置 Codex 接入 OmniRoute（`~/.codex/config.toml` + `~/.codex/models.json`，`wire_api = "responses"`），未设置时回退为官方 DeepSeek 集成直连 DeepSeek 官方 API（`wire_api = "responses"`），无需第三方 bridge。
 
-- 默认模型：`deepseek-v4-flash`
+OmniRoute 网关提供两个 DeepSeek 模型，Codex 中模型名映射关系如下：
+
+- `sol` ↔ `deepseek-v4-pro`（pro 档位）
+- `luna` ↔ `deepseek-v4-flash`（flash 档位，默认）
+
+- 默认模型：`deepseek-v4-flash`（luna）
 - 模型目录 `models.json` 来自官方 DeepSeek 集成脚本（含 `base_instructions` 等字段，兼容 Codex CLI >= 0.144.0）
 
 配置完成后直接在任意项目目录运行 `codex` 即可使用。

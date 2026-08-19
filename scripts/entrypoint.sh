@@ -118,45 +118,7 @@ if [ -n "$OMNIROUTE_TOKEN" ]; then
 OPENCODE_JSON
 fi
 
-# 5. 设置 claude settings.json（根据 CLAUDE_PROVIDER 选择使用哪个 key）
-CLAUDE_PROVIDER="${CLAUDE_PROVIDER:-deepseek}"
-write_claude_settings() {
-    local base_url="$1" token="$2"
-    local default_opus="${3:-deepseek-v4-pro[1m]}" default_sonnet="${4:-deepseek-v4-pro[1m]}"
-    local default_haiku="${5:-deepseek-v4-flash}" default_subagent="${6:-deepseek-v4-flash}"
-    cat > /home/ubuntu/.claude/settings.json <<- EOF
-{
-  "env": {
-    "ANTHROPIC_BASE_URL": "${base_url}",
-    "ANTHROPIC_AUTH_TOKEN": "${token}",
-    "ANTHROPIC_MODEL": "${CLAUDE_OPUS_MODEL:-$default_opus}",
-    "ANTHROPIC_DEFAULT_OPUS_MODEL": "${CLAUDE_OPUS_MODEL:-$default_opus}",
-    "ANTHROPIC_DEFAULT_SONNET_MODEL": "${CLAUDE_SONNET_MODEL:-$default_sonnet}",
-    "ANTHROPIC_DEFAULT_HAIKU_MODEL": "${CLAUDE_HAIKU_MODEL:-$default_haiku}",
-    "CLAUDE_CODE_SUBAGENT_MODEL": "${CLAUDE_SUBAGENT_MODEL:-$default_subagent}",
-    "CLAUDE_CODE_EFFORT_LEVEL": "max"
-  }
-}
-EOF
-}
-
-if [ "$CLAUDE_PROVIDER" = "opencode-go" ] && [ -n "$OPENCODE_GO_TOKEN" ]; then
-    echo "检测到 CLAUDE_PROVIDER=opencode-go，写入 claude settings.json"
-    mkdir -p /home/ubuntu/.claude
-    write_claude_settings "${OPENCODE_GO_BASE_URL:-https://api.opencode-go.com}" "${OPENCODE_GO_TOKEN}"
-elif [ "$CLAUDE_PROVIDER" = "omniroute" ] && [ -n "$OMNIROUTE_TOKEN" ]; then
-    echo "检测到 CLAUDE_PROVIDER=omniroute，写入 claude settings.json"
-    mkdir -p /home/ubuntu/.claude
-    # OmniRoute 使用 Anthropic 兼容根端点，不带 /v1
-    write_claude_settings "${OMNIROUTE_BASE_URL:-http://192.168.8.228:20128}" "${OMNIROUTE_TOKEN}" \
-        "deepseek-v4-flash" "deepseek-v4-flash" "deepseek-v4-flash" "deepseek-v4-flash"
-elif [ -n "$DEEPSEEK_TOKEN" ]; then
-    echo "检测到 DEEPSEEK_TOKEN，写入 claude settings.json"
-    mkdir -p /home/ubuntu/.claude
-    write_claude_settings "https://api.deepseek.com/anthropic" "${DEEPSEEK_TOKEN}"
-fi
-
-# 6. 配置 Codex：优先接入 OmniRoute（默认），无 OMNIROUTE_TOKEN 时回退 DeepSeek 官方
+# 5. 配置 Codex：优先接入 OmniRoute（默认），无 OMNIROUTE_TOKEN 时回退 DeepSeek 官方
 setup_codex_official() {
     if [ -z "${DEEPSEEK_TOKEN:-}" ] && [ -z "${OMNIROUTE_TOKEN:-}" ]; then
         echo "WARNING: Neither DEEPSEEK_TOKEN nor OMNIROUTE_TOKEN set. Codex setup skipped."
@@ -172,6 +134,8 @@ setup_codex_official() {
 
     if [ -n "${OMNIROUTE_TOKEN:-}" ]; then
         echo "Configuring Codex to use OmniRoute as the default provider..."
+        # OmniRoute 提供两个 deepseek 模型：sol 映射到 pro，luna 映射到 flash；
+        # slug 仍为 deepseek 原始型号，默认模型为 luna(flash) 对应的 deepseek-v4-flash
         cat > /home/ubuntu/.codex/config.toml << CODEX_CONFIG_TOML
 model = "deepseek-v4-flash"
 model_provider = "omniroute"
@@ -186,7 +150,7 @@ base_url = "${OMNIROUTE_BASE_URL:-http://192.168.8.228:20128}/v1"
 wire_api = "responses"
 experimental_bearer_token = "${OMNIROUTE_TOKEN}"
 CODEX_CONFIG_TOML
-        echo "Codex OmniRoute integration ready (model: deepseek-v4-flash, wire_api: responses)."
+        echo "Codex OmniRoute integration ready (model: deepseek-v4-flash (luna), sol->pro / luna->flash, wire_api: responses)."
     else
         echo "Configuring Codex with official DeepSeek integration..."
         cat > /home/ubuntu/.codex/config.toml << CODEX_CONFIG_TOML
