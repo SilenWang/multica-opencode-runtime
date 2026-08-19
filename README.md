@@ -9,7 +9,6 @@
 - 预装 opencode
 - 预装 Claude Code（`@anthropic-ai/claude-code`）
 - 预装 Codex CLI（`@openai/codex`，含官方 DeepSeek 集成配置）
-- 预装 CodeBuddy CLI（`@tencent-ai/codebuddy-code`）
 - 预装 Reasonix（含 DeepSeek 官方 API 配置）
 - 预装 Node.js v22（`v22.14.0`）
 - 已安装 GitHub CLI (gh)
@@ -43,8 +42,20 @@ GitHub 需要在容器启动后手动认证：使用`docker logs YOU_CONTAINER_N
 
 - `DEEPSEEK_TOKEN` — DeepSeek API key
 - `OPENCODE_GO_TOKEN` — OpenCode Go API key
+- `OMNIROUTE_TOKEN` — OmniRoute 网关 API key（配合 `OMNIROUTE_BASE_URL`，默认 `http://192.168.8.228:20128`）
 
-这些 key 会被写入 opencode `auth.json`，并同时用于 Claude Code（`~/.claude/settings.json`）、Codex（`~/.codex/`）、CodeBuddy（`~/.codebuddy/models.json`）和 Reasonix（`~/.reasonix/`）的配置，各程序可根据需要选择使用。
+这些 key 会被写入 opencode `auth.json`，并同时用于 Claude Code（`~/.claude/settings.json`）、Codex（`~/.codex/`）和 Reasonix（`~/.reasonix/`）的配置，各程序可根据需要选择使用。
+
+### OmniRoute 网关
+
+引入自定义 OmniRoute 网关作为 provider：
+
+- `OMNIROUTE_TOKEN` — OmniRoute API key
+- `OMNIROUTE_BASE_URL` — 网关地址，默认 `http://192.168.8.228:20128`
+- **Codex** 默认接入 OmniRoute（`wire_api = "responses"`，模型 `deepseek-v4-flash`）
+- **Claude Code** 可选 `CLAUDE_PROVIDER=omniroute` 接入 OmniRoute（Anthropic 兼容根端点，不带 `/v1`）
+- **opencode** 将 OmniRoute 作为额外 provider（`omniroute/*`），默认模型仍为 `deepseek/deepseek-v4-flash`
+- 未设置 `OMNIROUTE_TOKEN` 时，Codex 回退为 DeepSeek 官方直连
 
 ### Claude Code 提供商选择
 
@@ -52,6 +63,7 @@ GitHub 需要在容器启动后手动认证：使用`docker logs YOU_CONTAINER_N
 
 - `deepseek`（默认）— 使用 DeepSeek 的 Anthropic 兼容接口
 - `opencode-go` — 使用 OpenCode Go 的 API 接口（需设置 `OPENCODE_GO_TOKEN` 和 `OPENCODE_GO_BASE_URL`）
+- `omniroute` — 使用 OmniRoute 网关（需设置 `OMNIROUTE_TOKEN`，默认模型 `deepseek-v4-flash`）
 
 ### 可选模型覆盖
 
@@ -62,32 +74,26 @@ GitHub 需要在容器启动后手动认证：使用`docker logs YOU_CONTAINER_N
 - `CLAUDE_HAIKU_MODEL` — 默认 `deepseek-v4-flash`
 - `CLAUDE_SUBAGENT_MODEL` — 默认 `deepseek-v4-flash`
 
-### Codex CLI（官方 DeepSeek 集成）
+### Codex CLI（默认接入 OmniRoute）
 
-容器启动时使用 `DEEPSEEK_TOKEN` 自动配置 Codex 直连 DeepSeek 官方 API，采用 Codex 原生 provider 配置（`~/.codex/config.toml` + `~/.codex/models.json`，`wire_api = "responses"`），无需第三方 bridge。
+容器启动时优先使用 `OMNIROUTE_TOKEN` 配置 Codex 接入 OmniRoute（`~/.codex/config.toml` + `~/.codex/models.json`，`wire_api = "responses"`），未设置时回退为官方 DeepSeek 集成直连 DeepSeek 官方 API（`wire_api = "responses"`），无需第三方 bridge。
 
 - 默认模型：`deepseek-v4-flash`
 - 模型目录 `models.json` 来自官方 DeepSeek 集成脚本（含 `base_instructions` 等字段，兼容 Codex CLI >= 0.144.0）
 
 配置完成后直接在任意项目目录运行 `codex` 即可使用。
 
-### CodeBuddy CLI
-
-容器启动时自动生成 `~/.codebuddy/models.json`，包含三个模型：
-
-- `deepseek-v4-pro` — DeepSeek API
-- `deepseek-v4-flash` — DeepSeek API
-- `opencode-go` — OpenCode Go API（使用 `OPENCODE_GO_TOKEN` 和 `OPENCODE_GO_BASE_URL`）
-
-配置完成后直接在任意项目目录运行 `codebuddy` 即可使用。
-
 ### Reasonix 模型设置
 
-容器启动时使用 `DEEPSEEK_TOKEN` 自动配置 Reasonix 直连 DeepSeek 官方 API，写入 `~/.reasonix/.env`（`DEEPSEEK_API_KEY`，配置在 GitHub 登录之前）和 `~/.reasonix/config.toml`（provider 配置）。容器内已关闭 Reasonix sandbox（`bash = "off"`），避免缺少 bwrap 导致 bash 命令被拦截。
+容器启动时自动配置 Reasonix 同时接入 DeepSeek 官方和 OmniRoute，写入 `~/.reasonix/.env`（`DEEPSEEK_API_KEY`、`OMNIROUTE_API_KEY`，配置在 GitHub 登录之前）和 `~/.reasonix/config.toml`（provider 配置）。容器内已关闭 Reasonix sandbox（`bash = "off"`），避免缺少 bwrap 导致 bash 命令被拦截。
 
-- 默认模型：`deepseek/deepseek-v4-flash`（provider：`deepseek`，模型：`deepseek-v4-flash` / `deepseek-v4-pro`）
+- providers：
+  - `deepseek` — DeepSeek 官方 API，模型 `deepseek-v4-flash` / `deepseek-v4-pro`
+  - `omniroute` — OmniRoute 网关，模型 `deepseek-v4-flash` / `deepseek-v4-pro`
+- 默认模型：`deepseek/deepseek-v4-flash`
 - 可选覆盖默认模型名：
   - `REASONIX_DEFAULT_MODEL` — 默认 `deepseek/deepseek-v4-flash`
+- 切换 provider：`reasonix run --model deepseek "<任务>"` 或 `reasonix run --model omniroute "<任务>"`
 
 使用方式：在任意项目目录运行 `reasonix` 开启交互会话，或 `reasonix run "<任务>"` 无界面执行。
 

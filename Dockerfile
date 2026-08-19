@@ -17,7 +17,6 @@ RUN curl -fsSL --connect-timeout 10 --max-time 120 \
     rm /tmp/node.tar.xz
     
 RUN npm install -g @openai/codex && \
-    npm install -g @tencent-ai/codebuddy-code && \
     npm install -g @anthropic-ai/claude-code && \
     npm install -g reasonix && \
     npm cache clean --force

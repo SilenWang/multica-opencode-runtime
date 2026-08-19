@@ -2,22 +2,23 @@
 # 遇到错误立即停止运行
 set -e
 
-# 1. 配置 Reasonix（DEEPSEEK_API_KEY 写入 ~/.reasonix/.env + config.toml）
+# 1. 配置 Reasonix（DEEPSEEK_API_KEY + OMNIROUTE_API_KEY 写入 ~/.reasonix/.env + config.toml）
 setup_reasonix() {
-    if [ -z "${DEEPSEEK_TOKEN:-}" ]; then
-        echo "WARNING: DEEPSEEK_TOKEN not set. Reasonix DeepSeek setup skipped."
+    if [ -z "${DEEPSEEK_TOKEN:-}" ] && [ -z "${OMNIROUTE_TOKEN:-}" ]; then
+        echo "WARNING: Neither DEEPSEEK_TOKEN nor OMNIROUTE_TOKEN set. Reasonix setup skipped."
         return
     fi
 
-    echo "Configuring Reasonix with official DeepSeek integration..."
+    echo "Configuring Reasonix (DeepSeek official + OmniRoute)..."
     mkdir -p /home/ubuntu/.reasonix
 
     # 全局密钥文件 <Reasonix home>/.env，provider 通过 api_key_env 引用
     cat > /home/ubuntu/.reasonix/.env << REASONIX_ENV
 DEEPSEEK_API_KEY=${DEEPSEEK_TOKEN}
+OMNIROUTE_API_KEY=${OMNIROUTE_TOKEN}
 REASONIX_ENV
 
-    # 用户级 config.toml（~/.reasonix/config.toml），直连 DeepSeek 官方 API
+    # 用户级 config.toml（~/.reasonix/config.toml），接入 DeepSeek 官方 + OmniRoute
     cat > /home/ubuntu/.reasonix/config.toml << REASONIX_CONFIG
 config_version = 1
 default_model = "${REASONIX_DEFAULT_MODEL:-deepseek/deepseek-v4-flash}"
@@ -34,10 +35,17 @@ base_url    = "https://api.deepseek.com"
 models      = ["deepseek-v4-flash", "deepseek-v4-pro"]
 default     = "deepseek-v4-flash"
 api_key_env = "DEEPSEEK_API_KEY"
+
+[[providers]]
+name        = "omniroute"
+kind        = "openai"
+base_url    = "${OMNIROUTE_BASE_URL:-http://192.168.8.228:20128}/v1"
+models      = ["deepseek-v4-flash", "deepseek-v4-pro"]
+api_key_env = "OMNIROUTE_API_KEY"
 REASONIX_CONFIG
 
     chmod 600 /home/ubuntu/.reasonix/.env /home/ubuntu/.reasonix/config.toml 2>/dev/null || true
-    echo "Reasonix DeepSeek integration ready (default_model: ${REASONIX_DEFAULT_MODEL:-deepseek/deepseek-v4-flash})."
+    echo "Reasonix integration ready (providers: deepseek + omniroute, default_model: ${REASONIX_DEFAULT_MODEL:-deepseek/deepseek-v4-flash})."
 }
 
 setup_reasonix
@@ -69,23 +77,63 @@ if [ -n "$OPENCODE_GO_TOKEN" ]; then
     if [ "$FIRST" = true ]; then FIRST=false; else AUTH_JSON+=", "; fi
     AUTH_JSON+="\"opencode-go\": {\"type\": \"api\", \"key\": \"${OPENCODE_GO_TOKEN}\"}"
 fi
+if [ -n "$OMNIROUTE_TOKEN" ]; then
+    if [ "$FIRST" = true ]; then FIRST=false; else AUTH_JSON+=", "; fi
+    AUTH_JSON+="\"omniroute\": {\"type\": \"api\", \"key\": \"${OMNIROUTE_TOKEN}\"}"
+fi
 AUTH_JSON+="}"
 echo "$AUTH_JSON" > /home/ubuntu/.local/share/opencode/auth.json
+
+# 4b. opencode 自定义 provider 配置（opencode.json 中定义 omniroute 的 baseURL 和模型）
+#     deepseek 仍作为 opencode 默认模型；omniroute 仅作为额外 provider 可选
+echo "写入 opencode.json (omniroute 自定义 provider)"
+if [ -n "$OMNIROUTE_TOKEN" ]; then
+    mkdir -p /home/ubuntu/.config/opencode
+    cat > /home/ubuntu/.config/opencode/opencode.json <<OPENCODE_JSON
+{
+  "\$schema": "https://opencode.ai/config.json",
+  "model": "deepseek/deepseek-v4-flash",
+  "provider": {
+    "omniroute": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "OmniRoute",
+      "options": {
+        "baseURL": "${OMNIROUTE_BASE_URL:-http://192.168.8.228:20128}/v1",
+        "apiKey": "${OMNIROUTE_TOKEN}"
+      },
+      "models": {
+        "deepseek-v4-flash": {
+          "name": "DeepSeek V4 Flash (OmniRoute)"
+        },
+        "deepseek-v4-pro": {
+          "name": "DeepSeek V4 Pro (OmniRoute)"
+        },
+        "auto/coding": {
+          "name": "OmniRoute Auto Coding"
+        }
+      }
+    }
+  }
+}
+OPENCODE_JSON
+fi
 
 # 5. 设置 claude settings.json（根据 CLAUDE_PROVIDER 选择使用哪个 key）
 CLAUDE_PROVIDER="${CLAUDE_PROVIDER:-deepseek}"
 write_claude_settings() {
     local base_url="$1" token="$2"
+    local default_opus="${3:-deepseek-v4-pro[1m]}" default_sonnet="${4:-deepseek-v4-pro[1m]}"
+    local default_haiku="${5:-deepseek-v4-flash}" default_subagent="${6:-deepseek-v4-flash}"
     cat > /home/ubuntu/.claude/settings.json <<- EOF
 {
   "env": {
     "ANTHROPIC_BASE_URL": "${base_url}",
     "ANTHROPIC_AUTH_TOKEN": "${token}",
-    "ANTHROPIC_MODEL": "${CLAUDE_OPUS_MODEL:-deepseek-v4-pro[1m]}",
-    "ANTHROPIC_DEFAULT_OPUS_MODEL": "${CLAUDE_OPUS_MODEL:-deepseek-v4-pro[1m]}",
-    "ANTHROPIC_DEFAULT_SONNET_MODEL": "${CLAUDE_SONNET_MODEL:-deepseek-v4-pro[1m]}",
-    "ANTHROPIC_DEFAULT_HAIKU_MODEL": "${CLAUDE_HAIKU_MODEL:-deepseek-v4-flash}",
-    "CLAUDE_CODE_SUBAGENT_MODEL": "${CLAUDE_SUBAGENT_MODEL:-deepseek-v4-flash}",
+    "ANTHROPIC_MODEL": "${CLAUDE_OPUS_MODEL:-$default_opus}",
+    "ANTHROPIC_DEFAULT_OPUS_MODEL": "${CLAUDE_OPUS_MODEL:-$default_opus}",
+    "ANTHROPIC_DEFAULT_SONNET_MODEL": "${CLAUDE_SONNET_MODEL:-$default_sonnet}",
+    "ANTHROPIC_DEFAULT_HAIKU_MODEL": "${CLAUDE_HAIKU_MODEL:-$default_haiku}",
+    "CLAUDE_CODE_SUBAGENT_MODEL": "${CLAUDE_SUBAGENT_MODEL:-$default_subagent}",
     "CLAUDE_CODE_EFFORT_LEVEL": "max"
   }
 }
@@ -96,28 +144,52 @@ if [ "$CLAUDE_PROVIDER" = "opencode-go" ] && [ -n "$OPENCODE_GO_TOKEN" ]; then
     echo "检测到 CLAUDE_PROVIDER=opencode-go，写入 claude settings.json"
     mkdir -p /home/ubuntu/.claude
     write_claude_settings "${OPENCODE_GO_BASE_URL:-https://api.opencode-go.com}" "${OPENCODE_GO_TOKEN}"
+elif [ "$CLAUDE_PROVIDER" = "omniroute" ] && [ -n "$OMNIROUTE_TOKEN" ]; then
+    echo "检测到 CLAUDE_PROVIDER=omniroute，写入 claude settings.json"
+    mkdir -p /home/ubuntu/.claude
+    # OmniRoute 使用 Anthropic 兼容根端点，不带 /v1
+    write_claude_settings "${OMNIROUTE_BASE_URL:-http://192.168.8.228:20128}" "${OMNIROUTE_TOKEN}" \
+        "deepseek-v4-flash" "deepseek-v4-flash" "deepseek-v4-flash" "deepseek-v4-flash"
 elif [ -n "$DEEPSEEK_TOKEN" ]; then
     echo "检测到 DEEPSEEK_TOKEN，写入 claude settings.json"
     mkdir -p /home/ubuntu/.claude
     write_claude_settings "https://api.deepseek.com/anthropic" "${DEEPSEEK_TOKEN}"
 fi
 
-# 6. 使用官方方式配置 Codex 接入 DeepSeek（config.toml + models.json，不依赖第三方 bridge）
+# 6. 配置 Codex：优先接入 OmniRoute（默认），无 OMNIROUTE_TOKEN 时回退 DeepSeek 官方
 setup_codex_official() {
-    if [ -z "${DEEPSEEK_TOKEN:-}" ]; then
-        echo "WARNING: DEEPSEEK_TOKEN not set. Codex DeepSeek setup skipped."
+    if [ -z "${DEEPSEEK_TOKEN:-}" ] && [ -z "${OMNIROUTE_TOKEN:-}" ]; then
+        echo "WARNING: Neither DEEPSEEK_TOKEN nor OMNIROUTE_TOKEN set. Codex setup skipped."
         return
     fi
 
-    echo "Configuring Codex with official DeepSeek integration..."
+    echo "Configuring Codex..."
     mkdir -p /home/ubuntu/.codex
 
     # Write models.json — exact catalog from the official DeepSeek setup script
     # (includes base_instructions, required by Codex CLI >= 0.144.0)
     cp /codex-models.json /home/ubuntu/.codex/models.json
 
-    # Write config.toml
-    cat > /home/ubuntu/.codex/config.toml << CODEX_CONFIG_TOML
+    if [ -n "${OMNIROUTE_TOKEN:-}" ]; then
+        echo "Configuring Codex to use OmniRoute as the default provider..."
+        cat > /home/ubuntu/.codex/config.toml << CODEX_CONFIG_TOML
+model = "deepseek-v4-flash"
+model_provider = "omniroute"
+preferred_auth_method = "apikey"
+forced_login_method = "api"
+model_reasoning_effort = "high"
+model_catalog_json = "~/.codex/models.json"
+
+[model_providers.omniroute]
+name = "omniroute"
+base_url = "${OMNIROUTE_BASE_URL:-http://192.168.8.228:20128}/v1"
+wire_api = "responses"
+experimental_bearer_token = "${OMNIROUTE_TOKEN}"
+CODEX_CONFIG_TOML
+        echo "Codex OmniRoute integration ready (model: deepseek-v4-flash, wire_api: responses)."
+    else
+        echo "Configuring Codex with official DeepSeek integration..."
+        cat > /home/ubuntu/.codex/config.toml << CODEX_CONFIG_TOML
 model = "deepseek-v4-flash"
 model_provider = "deepseek"
 preferred_auth_method = "apikey"
@@ -131,73 +203,12 @@ base_url = "https://api.deepseek.com/"
 wire_api = "responses"
 experimental_bearer_token = "${DEEPSEEK_TOKEN}"
 CODEX_CONFIG_TOML
+        echo "Codex official DeepSeek integration ready (model: deepseek-v4-flash, wire_api: responses)."
+    fi
 
     chmod 600 /home/ubuntu/.codex/config.toml 2>/dev/null || true
-    echo "Codex official DeepSeek integration ready (model: deepseek-v4-flash, wire_api: responses)."
 }
-# 7. 生成 CodeBuddy models.json（接入 DeepSeek 官方 API 和 opencode go）
-setup_codebuddy_models() {
-    mkdir -p /home/ubuntu/.codebuddy
-
-    local deepseek_key="${DEEPSEEK_TOKEN:-}"
-    local opencode_go_key="${OPENCODE_GO_TOKEN:-}"
-    local opencode_go_url="${OPENCODE_GO_BASE_URL:-https://api.opencode-go.com}"
-
-    cat > /home/ubuntu/.codebuddy/models.json <<MODELS
-{
-  "models": [
-    {
-      "id": "deepseek-v4-pro",
-      "name": "DeepSeek V4 Pro",
-      "vendor": "DeepSeek",
-      "url": "https://api.deepseek.com/v1/chat/completions",
-      "apiKey": "${deepseek_key}",
-      "maxInputTokens": 128000,
-      "maxOutputTokens": 8192,
-      "supportsToolCall": true,
-      "supportsImages": false,
-      "supportsReasoning": true,
-      "relatedModels": {
-        "lite": "deepseek-v4-flash",
-        "reasoning": "deepseek-v4-pro"
-      }
-    },
-    {
-      "id": "deepseek-v4-flash",
-      "name": "DeepSeek V4 Flash",
-      "vendor": "DeepSeek",
-      "url": "https://api.deepseek.com/v1/chat/completions",
-      "apiKey": "${deepseek_key}",
-      "maxInputTokens": 128000,
-      "maxOutputTokens": 8192,
-      "supportsToolCall": true,
-      "supportsImages": false
-    },
-    {
-      "id": "opencode-go",
-      "name": "OpenCode Go",
-      "vendor": "OpenCode",
-      "url": "${opencode_go_url}/v1/chat/completions",
-      "apiKey": "${opencode_go_key}",
-      "maxInputTokens": 128000,
-      "maxOutputTokens": 8192,
-      "supportsToolCall": true,
-      "supportsImages": false
-    }
-  ],
-  "availableModels": [
-    "deepseek-v4-pro",
-    "deepseek-v4-flash",
-    "opencode-go"
-  ]
-}
-MODELS
-    chmod 600 /home/ubuntu/.codebuddy/models.json 2>/dev/null || true
-    echo "CodeBuddy models.json configured."
-}
-
 setup_codex_official
-setup_codebuddy_models
 
 # 继续运行
 exec "$@"
