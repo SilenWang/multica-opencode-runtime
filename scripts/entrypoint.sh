@@ -60,11 +60,7 @@ if [ -n "$MULTICA_TOKEN" ]; then
     multica daemon start
 fi
 
-# 3. Github登录
-echo "准备设置 Github"
-echo -e "\n\n\n" | gh auth login --hostname github.com -w
-
-# 4. 写入 opencode auth.json（所有可用的 provider key）
+# 3. 写入 opencode auth.json（所有可用的 provider key）
 echo "写入 opencode auth.json"
 mkdir -p /home/ubuntu/.local/share/opencode
 AUTH_JSON="{"
@@ -84,8 +80,6 @@ fi
 AUTH_JSON+="}"
 echo "$AUTH_JSON" > /home/ubuntu/.local/share/opencode/auth.json
 
-# 4b. opencode 自定义 provider 配置（opencode.json 中定义 omniroute 的 baseURL 和模型）
-#     deepseek 仍作为 opencode 默认模型；omniroute 仅作为额外 provider 可选
 echo "写入 opencode.json (omniroute 自定义 provider)"
 if [ -n "$OMNIROUTE_TOKEN" ]; then
     mkdir -p /home/ubuntu/.config/opencode
@@ -118,7 +112,7 @@ if [ -n "$OMNIROUTE_TOKEN" ]; then
 OPENCODE_JSON
 fi
 
-# 5. 配置 Codex：优先接入 OmniRoute（默认），无 OMNIROUTE_TOKEN 时回退 DeepSeek 官方
+# 4. 配置 Codex：优先接入 OmniRoute（默认），无 OMNIROUTE_TOKEN 时回退 DeepSeek 官方
 setup_codex_official() {
     if [ -z "${DEEPSEEK_TOKEN:-}" ] && [ -z "${OMNIROUTE_TOKEN:-}" ]; then
         echo "WARNING: Neither DEEPSEEK_TOKEN nor OMNIROUTE_TOKEN set. Codex setup skipped."
@@ -143,6 +137,8 @@ preferred_auth_method = "apikey"
 forced_login_method = "api"
 model_reasoning_effort = "high"
 model_catalog_json = "~/.codex/models.json"
+# 因 OmniRoute 网关只接受 function 工具，需关闭 Codex 默认开启的 web_search
+web_search = "disabled"
 
 [model_providers.omniroute]
 name = "omniroute"
@@ -160,6 +156,7 @@ preferred_auth_method = "apikey"
 forced_login_method = "api"
 model_reasoning_effort = "high"
 model_catalog_json = "~/.codex/models.json"
+web_search = "disabled"
 
 [model_providers.deepseek]
 name = "deepseek"
@@ -173,6 +170,10 @@ CODEX_CONFIG_TOML
     chmod 600 /home/ubuntu/.codex/config.toml 2>/dev/null || true
 }
 setup_codex_official
+
+# 5. Github登录（放最后，避免阻塞前面的自动化配置）
+echo "准备设置 Github"
+echo -e "\n\n\n" | gh auth login --hostname github.com -w
 
 # 继续运行
 exec "$@"
