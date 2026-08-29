@@ -50,6 +50,68 @@ REASONIX_CONFIG
 
 setup_reasonix
 
+# 1.5 配置 dsh（DeepSeek Harness）：DEEPSEEK_API_KEY + settings.yaml（在 daemon 启动前完成）
+setup_dsh() {
+    if [ -z "${DEEPSEEK_TOKEN:-}" ] && [ -z "${OMNIROUTE_TOKEN:-}" ]; then
+        echo "WARNING: Neither DEEPSEEK_TOKEN nor OMNIROUTE_TOKEN set. dsh setup skipped."
+        return
+    fi
+
+    echo "Configuring dsh (DeepSeek Harness)..."
+    export DSH_HOME="${DSH_HOME:-/home/ubuntu/.dsh}"
+    mkdir -p "${DSH_HOME}"
+
+    # Multica 运行时 profile（镜像构建时已安装；缺失时补装）
+    if [ ! -d "${DSH_HOME}/profiles/multica" ]; then
+        echo "Installing dsh multica profile..."
+        dsh plugin --profile multica add dsh-profile-multica || echo "WARNING: dsh multica profile install failed."
+    fi
+
+    # provider 凭证：dsh 通过 apiKeyEnv 从环境变量解析
+    if [ -n "${DEEPSEEK_TOKEN:-}" ]; then
+        export DEEPSEEK_API_KEY="${DEEPSEEK_TOKEN}"
+    fi
+    if [ -n "${OMNIROUTE_TOKEN:-}" ]; then
+        export OMNIROUTE_API_KEY="${OMNIROUTE_TOKEN}"
+    fi
+
+    # provider 配置写入 $DSH_HOME/settings.yaml（参考 dsh providers 文档：Settings → Models）
+    cat > "${DSH_HOME}/settings.yaml" << DSH_SETTINGS
+llm-deepseek:
+  apiKeyEnv: DEEPSEEK_API_KEY
+  baseURL: https://api.deepseek.com
+  models:
+    - id: deepseek-v4-flash
+    - id: deepseek-v4-pro
+DSH_SETTINGS
+
+    if [ -n "${OMNIROUTE_TOKEN:-}" ]; then
+        cat >> "${DSH_HOME}/settings.yaml" << DSH_OMNI
+
+llm-pi-ai:
+  providers:
+    omniroute:
+      apiKeyEnv: OMNIROUTE_API_KEY
+      api: openai-completions
+      baseURL: "${OMNIROUTE_BASE_URL:-http://192.168.8.228:20128}/v1"
+      models:
+        - id: deepseek-v4-flash
+        - id: deepseek-v4-pro
+DSH_OMNI
+    fi
+
+    chmod 600 "${DSH_HOME}/settings.yaml" 2>/dev/null || true
+
+    # 守护进程只有在 dsh --profile multica --probe 成功后才注册 DeepSeek Harness
+    if dsh --profile multica --probe >/dev/null 2>&1; then
+        echo "dsh multica profile probe OK (DeepSeek Harness registered)."
+    else
+        echo "WARNING: dsh --profile multica --probe failed."
+    fi
+}
+
+setup_dsh
+
 # 2. Multica 登录
 echo "准备设置Multica"
 if [ -n "$MULTICA_TOKEN" ]; then
@@ -170,6 +232,82 @@ CODEX_CONFIG_TOML
     chmod 600 /home/ubuntu/.codex/config.toml 2>/dev/null || true
 }
 setup_codex_official
+
+# 4b. 生成 CodeBuddy models.json（接入 DeepSeek 官方 API、OpenCode Go 和 OmniRoute 网关）
+setup_codebuddy_models() {
+    mkdir -p /home/ubuntu/.codebuddy
+
+    local deepseek_key="${DEEPSEEK_TOKEN:-}"
+    local opencode_go_key="${OPENCODE_GO_TOKEN:-}"
+    local opencode_go_url="${OPENCODE_GO_BASE_URL:-https://api.opencode-go.com}"
+    local omniroute_key="${OMNIROUTE_TOKEN:-}"
+    local omniroute_url="${OMNIROUTE_BASE_URL:-http://192.168.8.228:20128}"
+
+    cat > /home/ubuntu/.codebuddy/models.json <<MODELS
+{
+  "models": [
+    {
+      "id": "deepseek-v4-pro",
+      "name": "DeepSeek V4 Pro",
+      "vendor": "DeepSeek",
+      "url": "https://api.deepseek.com/v1/chat/completions",
+      "apiKey": "${deepseek_key}",
+      "maxInputTokens": 128000,
+      "maxOutputTokens": 8192,
+      "supportsToolCall": true,
+      "supportsImages": false,
+      "supportsReasoning": true,
+      "relatedModels": {
+        "lite": "deepseek-v4-flash",
+        "reasoning": "deepseek-v4-pro"
+      }
+    },
+    {
+      "id": "deepseek-v4-flash",
+      "name": "DeepSeek V4 Flash",
+      "vendor": "DeepSeek",
+      "url": "https://api.deepseek.com/v1/chat/completions",
+      "apiKey": "${deepseek_key}",
+      "maxInputTokens": 128000,
+      "maxOutputTokens": 8192,
+      "supportsToolCall": true,
+      "supportsImages": false
+    },
+    {
+      "id": "opencode-go",
+      "name": "OpenCode Go",
+      "vendor": "OpenCode",
+      "url": "${opencode_go_url}/v1/chat/completions",
+      "apiKey": "${opencode_go_key}",
+      "maxInputTokens": 128000,
+      "maxOutputTokens": 8192,
+      "supportsToolCall": true,
+      "supportsImages": false
+    },
+    {
+      "id": "deepseek-v4-flash-omniroute",
+      "name": "DeepSeek V4 Flash (OmniRoute)",
+      "vendor": "OmniRoute",
+      "url": "${omniroute_url}/v1/chat/completions",
+      "apiKey": "${omniroute_key}",
+      "maxInputTokens": 128000,
+      "maxOutputTokens": 8192,
+      "supportsToolCall": true,
+      "supportsImages": false
+    }
+  ],
+  "availableModels": [
+    "deepseek-v4-pro",
+    "deepseek-v4-flash",
+    "opencode-go",
+    "deepseek-v4-flash-omniroute"
+  ]
+}
+MODELS
+    chmod 600 /home/ubuntu/.codebuddy/models.json 2>/dev/null || true
+    echo "CodeBuddy models.json configured."
+}
+setup_codebuddy_models
 
 # 5. Github登录（放最后，避免阻塞前面的自动化配置）
 echo "准备设置 Github"
