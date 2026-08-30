@@ -16,6 +16,7 @@ setup_reasonix() {
     cat > /home/ubuntu/.reasonix/.env << REASONIX_ENV
 DEEPSEEK_API_KEY=${DEEPSEEK_TOKEN}
 OMNIROUTE_API_KEY=${OMNIROUTE_TOKEN}
+NEW_API_KEY=${NEW_API_TOKEN}
 REASONIX_ENV
 
     # 用户级 config.toml（~/.reasonix/config.toml），接入 DeepSeek 官方 + OmniRoute
@@ -42,10 +43,17 @@ kind        = "openai"
 base_url    = "${OMNIROUTE_BASE_URL:-http://192.168.8.228:20128}/v1"
 models      = ["deepseek-v4-flash", "deepseek-v4-pro"]
 api_key_env = "OMNIROUTE_API_KEY"
+
+[[providers]]
+name        = "newapi"
+kind        = "openai"
+base_url    = "${NEW_API_BASE_URL:-http://192.168.8.228:3000}/v1"
+models      = ["deepseek-v4-flash", "deepseek-v4-pro", "qwen3.8-flash"]
+api_key_env = "NEW_API_KEY"
 REASONIX_CONFIG
 
     chmod 600 /home/ubuntu/.reasonix/.env /home/ubuntu/.reasonix/config.toml 2>/dev/null || true
-    echo "Reasonix integration ready (providers: deepseek + omniroute, default_model: ${REASONIX_DEFAULT_MODEL:-deepseek/deepseek-v4-flash})."
+    echo "Reasonix integration ready (providers: deepseek + omniroute + newapi, default_model: ${REASONIX_DEFAULT_MODEL:-deepseek/deepseek-v4-flash})."
 }
 
 setup_reasonix
@@ -74,6 +82,9 @@ setup_dsh() {
     if [ -n "${OMNIROUTE_TOKEN:-}" ]; then
         export OMNIROUTE_API_KEY="${OMNIROUTE_TOKEN}"
     fi
+    if [ -n "${NEW_API_TOKEN:-}" ]; then
+        export NEW_API_KEY="${NEW_API_TOKEN}"
+    fi
 
     # provider 配置写入 $DSH_HOME/settings.yaml（参考 dsh providers 文档：Settings → Models）
     cat > "${DSH_HOME}/settings.yaml" << DSH_SETTINGS
@@ -91,12 +102,28 @@ DSH_SETTINGS
 llm-pi-ai:
   providers:
     omniroute:
-      apiKeyEnv: OMNIROUTE_API_KEY
+      apiKeyEnv: OMNIROUTE_TOKEN
       api: openai-completions
       baseURL: "${OMNIROUTE_BASE_URL:-http://192.168.8.228:20128}/v1"
       models:
         - id: deepseek-v4-flash
         - id: deepseek-v4-pro
+DSH_OMNI
+    fi
+
+    if [ -n "${NEW_API_TOKEN:-}" ]; then
+        cat >> "${DSH_HOME}/settings.yaml" << DSH_OMNI
+
+llm-new-api:
+  providers:
+    new_api:
+      apiKeyEnv: NEW_API_TOKEN
+      api: openai-completions
+      baseURL: "${NEW_API_BASE_URL:-http://192.168.8.228:3000}/v1"
+      models:
+        - id: deepseek-v4-flash
+        - id: deepseek-v4-pro
+        - id: qwen3.8-flash
 DSH_OMNI
     fi
 
@@ -111,16 +138,6 @@ DSH_OMNI
 }
 
 setup_dsh
-
-# 2. Multica 登录
-echo "准备设置Multica"
-if [ -n "$MULTICA_TOKEN" ]; then
-    echo "检测到 MULTICA_TOKEN 自动登录 mulitca 并启动"
-    multica config set server_url https://api.multica.ai
-    multica config set app_url https://multica.ai
-    multica login --token ${MULTICA_TOKEN}
-    multica daemon start
-fi
 
 # 3. 写入 opencode auth.json（所有可用的 provider key）
 echo "写入 opencode auth.json"
@@ -138,6 +155,10 @@ fi
 if [ -n "$OMNIROUTE_TOKEN" ]; then
     if [ "$FIRST" = true ]; then FIRST=false; else AUTH_JSON+=", "; fi
     AUTH_JSON+="\"omniroute\": {\"type\": \"api\", \"key\": \"${OMNIROUTE_TOKEN}\"}"
+fi
+if [ -n "$NEW_API_TOKEN" ]; then
+    if [ "$FIRST" = true ]; then FIRST=false; else AUTH_JSON+=", "; fi
+    AUTH_JSON+="\"newapi\": {\"type\": \"api\", \"key\": \"${NEW_API_TOKEN}\"}"
 fi
 AUTH_JSON+="}"
 echo "$AUTH_JSON" > /home/ubuntu/.local/share/opencode/auth.json
@@ -168,16 +189,32 @@ if [ -n "$OMNIROUTE_TOKEN" ]; then
           "name": "OmniRoute Auto Coding"
         }
       }
+    },
+    "newapi": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "New-API",
+      "options": {
+        "baseURL": "${NEW_API_BASE_URL:-http://192.168.8.228:3000}/v1",
+        "apiKey": "${NEW_API_TOKEN}"
+      },
+      "models": {
+        "deepseek-v4-flash": {
+          "name": "DeepSeek V4 Flash (New-API)"
+        },
+        "deepseek-v4-pro": {
+          "name": "DeepSeek V4 Pro (New-API)"
+        }
+      }
     }
   }
 }
 OPENCODE_JSON
 fi
 
-# 4. 配置 Codex：优先接入 OmniRoute（默认），无 OMNIROUTE_TOKEN 时回退 DeepSeek 官方
+# 4. 配置 Codex：优先接入 New-API（默认），无 NEW_API_TOKEN 时回退 DeepSeek 官方
 setup_codex_official() {
-    if [ -z "${DEEPSEEK_TOKEN:-}" ] && [ -z "${OMNIROUTE_TOKEN:-}" ]; then
-        echo "WARNING: Neither DEEPSEEK_TOKEN nor OMNIROUTE_TOKEN set. Codex setup skipped."
+    if [ -z "${DEEPSEEK_TOKEN:-}" ] && [ -z "${NEW_API_TOKEN:-}" ]; then
+        echo "WARNING: Neither DEEPSEEK_TOKEN nor NEW_API_TOKEN set. Codex setup skipped."
         return
     fi
 
@@ -188,27 +225,27 @@ setup_codex_official() {
     # (includes base_instructions, required by Codex CLI >= 0.144.0)
     cp /codex-models.json /home/ubuntu/.codex/models.json
 
-    if [ -n "${OMNIROUTE_TOKEN:-}" ]; then
-        echo "Configuring Codex to use OmniRoute as the default provider..."
-        # OmniRoute 提供两个 deepseek 模型：sol 映射到 pro，luna 映射到 flash；
+    if [ -n "${NEW_API_TOKEN:-}" ]; then
+        echo "Configuring Codex to use New-API as the default provider..."
+        # New-API 提供两个 deepseek 模型：sol 映射到 pro，luna 映射到 flash；
         # slug 仍为 deepseek 原始型号，默认模型为 luna(flash) 对应的 deepseek-v4-flash
         cat > /home/ubuntu/.codex/config.toml << CODEX_CONFIG_TOML
 model = "deepseek-v4-flash"
-model_provider = "omniroute"
+model_provider = "newapi"
 preferred_auth_method = "apikey"
 forced_login_method = "api"
 model_reasoning_effort = "high"
 model_catalog_json = "~/.codex/models.json"
-# 因 OmniRoute 网关只接受 function 工具，需关闭 Codex 默认开启的 web_search
+# 因 New API 网关只接受 function 工具，需关闭 Codex 默认开启的 web_search
 web_search = "disabled"
 
-[model_providers.omniroute]
-name = "omniroute"
-base_url = "${OMNIROUTE_BASE_URL:-http://192.168.8.228:20128}/v1"
+[model_providers.newapi]
+name = "newapi"
+base_url = "${NEW_API_BASE_URL:-http://192.168.8.228:3000}/v1"
 wire_api = "responses"
-experimental_bearer_token = "${OMNIROUTE_TOKEN}"
+experimental_bearer_token = "${NEW_API_TOKEN}"
 CODEX_CONFIG_TOML
-        echo "Codex OmniRoute integration ready (model: deepseek-v4-flash (luna), sol->pro / luna->flash, wire_api: responses)."
+        echo "Codex New API integration ready (model: deepseek-v4-flash (luna), sol->pro / luna->flash, wire_api: responses)."
     else
         echo "Configuring Codex with official DeepSeek integration..."
         cat > /home/ubuntu/.codex/config.toml << CODEX_CONFIG_TOML
@@ -238,58 +275,29 @@ setup_codebuddy_models() {
     mkdir -p /home/ubuntu/.codebuddy
 
     local deepseek_key="${DEEPSEEK_TOKEN:-}"
-    local opencode_go_key="${OPENCODE_GO_TOKEN:-}"
-    local opencode_go_url="${OPENCODE_GO_BASE_URL:-https://api.opencode-go.com}"
-    local omniroute_key="${OMNIROUTE_TOKEN:-}"
-    local omniroute_url="${OMNIROUTE_BASE_URL:-http://192.168.8.228:20128}"
+    local newapi_key="${NEW_API_TOKEN:-}"
+    local newapi_url="${NEW_API_BASE_URL:-http://192.168.8.228:3000}"
 
     cat > /home/ubuntu/.codebuddy/models.json <<MODELS
 {
   "models": [
     {
-      "id": "deepseek-v4-pro",
-      "name": "DeepSeek V4 Pro",
-      "vendor": "DeepSeek",
-      "url": "https://api.deepseek.com/v1/chat/completions",
-      "apiKey": "${deepseek_key}",
-      "maxInputTokens": 128000,
-      "maxOutputTokens": 8192,
-      "supportsToolCall": true,
-      "supportsImages": false,
-      "supportsReasoning": true,
-      "relatedModels": {
-        "lite": "deepseek-v4-flash",
-        "reasoning": "deepseek-v4-pro"
-      }
-    },
-    {
       "id": "deepseek-v4-flash",
-      "name": "DeepSeek V4 Flash",
-      "vendor": "DeepSeek",
-      "url": "https://api.deepseek.com/v1/chat/completions",
-      "apiKey": "${deepseek_key}",
+      "name": "DeepSeek V4 Flash (New-API)",
+      "vendor": "New-API",
+      "url": "${newapi_url}/v1/chat/completions",
+      "apiKey": "${newapi_key}",
       "maxInputTokens": 128000,
       "maxOutputTokens": 8192,
       "supportsToolCall": true,
       "supportsImages": false
     },
     {
-      "id": "opencode-go",
-      "name": "OpenCode Go",
-      "vendor": "OpenCode",
-      "url": "${opencode_go_url}/v1/chat/completions",
-      "apiKey": "${opencode_go_key}",
-      "maxInputTokens": 128000,
-      "maxOutputTokens": 8192,
-      "supportsToolCall": true,
-      "supportsImages": false
-    },
-    {
-      "id": "deepseek-v4-flash-omniroute",
-      "name": "DeepSeek V4 Flash (OmniRoute)",
-      "vendor": "OmniRoute",
-      "url": "${omniroute_url}/v1/chat/completions",
-      "apiKey": "${omniroute_key}",
+      "id": "deepseek-v4-pro",
+      "name": "DeepSeek V4 Pro (New-API)",
+      "vendor": "New-API",
+      "url": "${newapi_url}/v1/chat/completions",
+      "apiKey": "${newapi_key}",
       "maxInputTokens": 128000,
       "maxOutputTokens": 8192,
       "supportsToolCall": true,
@@ -299,15 +307,38 @@ setup_codebuddy_models() {
   "availableModels": [
     "deepseek-v4-pro",
     "deepseek-v4-flash",
-    "opencode-go",
-    "deepseek-v4-flash-omniroute"
   ]
 }
 MODELS
     chmod 600 /home/ubuntu/.codebuddy/models.json 2>/dev/null || true
     echo "CodeBuddy models.json configured."
 }
+
 setup_codebuddy_models
+
+# 设置 selfhosted 模式，跳过 CodeBuddy 的登录流程
+export CODEBUDDY_INTERNET_ENVIRONMENT=selfhosted
+
+# 设置默认模型为 OmniRoute 的 deepseek-v4-flash
+cat > /home/ubuntu/.codebuddy/settings.json <<CODEBUDDY_SETTINGS
+{
+  "model": "custom-local:deepseek-v4-flash",
+  "sandbox": {
+    "enabled": false
+  }
+}
+CODEBUDDY_SETTINGS
+
+# 2. Multica 登录
+echo "准备设置Multica"
+if [ -n "$MULTICA_TOKEN" ]; then
+    echo "检测到 MULTICA_TOKEN 自动登录 mulitca 并启动"
+    multica config set server_url https://api.multica.ai
+    multica config set app_url https://multica.ai
+    multica login --token ${MULTICA_TOKEN}
+    multica daemon start
+fi
+
 
 # 5. Github登录（放最后，避免阻塞前面的自动化配置）
 echo "准备设置 Github"
