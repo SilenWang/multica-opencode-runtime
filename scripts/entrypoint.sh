@@ -87,45 +87,33 @@ setup_dsh() {
     fi
 
     # provider 配置写入 $DSH_HOME/settings.yaml（参考 dsh providers 文档：Settings → Models）
-    cat > "${DSH_HOME}/settings.yaml" << DSH_SETTINGS
-llm-deepseek:
-  apiKeyEnv: DEEPSEEK_API_KEY
-  baseURL: https://api.deepseek.com
-  models:
-    - id: deepseek-v4-flash
-    - id: deepseek-v4-pro
-DSH_SETTINGS
-
-    if [ -n "${OMNIROUTE_TOKEN:-}" ]; then
-        cat >> "${DSH_HOME}/settings.yaml" << DSH_OMNI
-
-llm-pi-ai:
-  providers:
-    omniroute:
-      apiKeyEnv: OMNIROUTE_TOKEN
-      api: openai-completions
-      baseURL: "${OMNIROUTE_BASE_URL:-http://192.168.8.228:20128}/v1"
-      models:
-        - id: deepseek-v4-flash
-        - id: deepseek-v4-pro
-DSH_OMNI
-    fi
-
-    if [ -n "${NEW_API_TOKEN:-}" ]; then
-        cat >> "${DSH_HOME}/settings.yaml" << DSH_OMNI
-
-llm-new-api:
-  providers:
-    new_api:
-      apiKeyEnv: NEW_API_TOKEN
-      api: openai-completions
-      baseURL: "${NEW_API_BASE_URL:-http://192.168.8.228:3000}/v1"
-      models:
-        - id: deepseek-v4-flash
-        - id: deepseek-v4-pro
-        - id: qwen3.8-flash
-DSH_OMNI
-    fi
+    # 注意：所有自定义 provider 必须合并进单一 llm-pi-ai.providers 节点下，
+    # 重复的顶层键会导致 DUPLICATE_KEY 使 dsh profile 加载失败（multica 无法检测到 dsh）
+    {
+        printf 'llm-deepseek:\n'
+        printf '  apiKeyEnv: DEEPSEEK_API_KEY\n'
+        printf '  baseURL: https://api.deepseek.com\n'
+        printf '  models:\n'
+        printf '    - id: deepseek-v4-flash\n'
+        printf '    - id: deepseek-v4-pro\n'
+        if [ -n "${OMNIROUTE_TOKEN:-}" ]; then
+            printf '\nllm-pi-ai:\n  providers:\n    omniroute:\n'
+            printf '      apiKeyEnv: OMNIROUTE_API_KEY\n'
+            printf '      api: openai-completions\n'
+            printf '      baseURL: "%s/v1"\n' "${OMNIROUTE_BASE_URL:-http://192.168.8.228:20128}"
+            printf '      models:\n        - id: deepseek-v4-flash\n        - id: deepseek-v4-pro\n'
+        fi
+        if [ -n "${NEW_API_TOKEN:-}" ]; then
+            if [ -z "${OMNIROUTE_TOKEN:-}" ]; then
+                printf '\nllm-pi-ai:\n  providers:\n'
+            fi
+            printf '    new_api:\n'
+            printf '      apiKeyEnv: NEW_API_KEY\n'
+            printf '      api: openai-completions\n'
+            printf '      baseURL: "%s/v1"\n' "${NEW_API_BASE_URL:-http://192.168.8.228:3000}"
+            printf '      models:\n        - id: deepseek-v4-flash\n        - id: deepseek-v4-pro\n        - id: qwen3.8-flash\n'
+        fi
+    } > "${DSH_HOME}/settings.yaml"
 
     chmod 600 "${DSH_HOME}/settings.yaml" 2>/dev/null || true
 
@@ -241,7 +229,7 @@ web_search = "disabled"
 
 [model_providers.newapi]
 name = "newapi"
-base_url = "${NEW_API_BASE_URL:-http://192.168.8.228:3000}/v1"
+base_url = "${NEW_API_BASE_URL:-http://192.168.8.228:3000}"
 wire_api = "responses"
 experimental_bearer_token = "${NEW_API_TOKEN}"
 CODEX_CONFIG_TOML
