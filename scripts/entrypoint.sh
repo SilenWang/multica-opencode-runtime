@@ -209,7 +209,8 @@ fi
 # 与 https://help.router-for.me/configuration/provider/openai-compatibility.html
 #
 # 开关 CLIPROXY_BRIDGE：
-#   auto（默认）—— 探测上游 /v1/responses，仅在它明确不支持（404/405/501）时启用桥接
+#   auto（默认）—— 探测上游 /v1/responses：404/405/501 明确不支持时启用；上游为
+#           上游为 newapi 时 401/403 也启用（其鉴权早于路由匹配）；探测不通时保持直连
 #   on  —— 无条件启用
 #   off —— 禁用，保持直连
 setup_cliproxyapi() {
@@ -266,8 +267,18 @@ setup_cliproxyapi() {
             200)
                 echo "Upstream ${BRIDGE_UPSTREAM} already serves /v1/responses (HTTP 200); bridge not needed."
                 return ;;
+            401|403)
+                # new-api 是本次要解决的目标上游，它只提供 chat/completions；
+                # 它的鉴权在路由匹配之前，探测常被 401/403 拦下，不能因此放弃桥接。
+                # 其它上游（如 DeepSeek 官方）结论不明时保持既有直连行为。
+                if [ "${BRIDGE_UPSTREAM}" = "newapi" ]; then
+                    echo "Upstream newapi probe returned HTTP ${probe_code} (auth happens before routing); enabling CLIProxyAPI bridge anyway."
+                else
+                    echo "CLIProxyAPI bridge skipped: /v1/responses probe inconclusive (HTTP ${probe_code})."
+                    return
+                fi ;;
             *)
-                # 探测结论不确定（鉴权/网络/参数差异），不擅自改变既有行为
+                # 网络不通等：不擅自改变既有行为
                 echo "CLIProxyAPI bridge skipped: /v1/responses probe inconclusive (HTTP ${probe_code})."
                 return ;;
         esac

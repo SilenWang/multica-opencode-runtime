@@ -84,7 +84,7 @@ codex ──responses──> 127.0.0.1:8317 (CLIProxyAPI) ──chat/completions
 
 容器启动时 `setup_cliproxyapi` 会：
 
-1. 探测上游 `POST /v1/responses`；返回 404/405/501 才启用桥接，返回 200 或探测结论不确定（401、网络不通）时保持原有直连，不改变既有行为；
+1. 探测上游 `POST /v1/responses`：404/405/501 明确不支持时启用桥接；上游为 new-api 时 401/403 也启用（其鉴权早于路由匹配）；返回 200 或探测不通时保持原有直连，不改变既有行为；
 2. 生成 `~/.cli-proxy-api/config.yaml`（只绑 `127.0.0.1`，上游配在 `openai-compatibility` 下），拉起 `cliproxyapi` 并等 `/v1/models` 就绪（30s 超时，失败则回退直连）；
 3. 把 `~/.codex/config.toml` 的 `base_url` 指到 `http://127.0.0.1:8317/v1`，`experimental_bearer_token` 换成桥接自身的 key。
 
