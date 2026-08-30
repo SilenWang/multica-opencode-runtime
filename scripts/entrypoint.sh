@@ -270,65 +270,6 @@ CODEX_CONFIG_TOML
 }
 setup_codex_official
 
-# 4b. 生成 CodeBuddy models.json（接入 DeepSeek 官方 API、OpenCode Go 和 OmniRoute 网关）
-setup_codebuddy_models() {
-    mkdir -p /home/ubuntu/.codebuddy
-
-    local deepseek_key="${DEEPSEEK_TOKEN:-}"
-    local newapi_key="${NEW_API_TOKEN:-}"
-    local newapi_url="${NEW_API_BASE_URL:-http://192.168.8.228:3000}"
-
-    cat > /home/ubuntu/.codebuddy/models.json <<MODELS
-{
-  "models": [
-    {
-      "id": "deepseek-v4-flash",
-      "name": "DeepSeek V4 Flash (New-API)",
-      "vendor": "New-API",
-      "url": "${newapi_url}/v1/chat/completions",
-      "apiKey": "${newapi_key}",
-      "maxInputTokens": 1280000,
-      "maxOutputTokens": 81920,
-      "supportsToolCall": true,
-      "supportsImages": false
-    },
-    {
-      "id": "deepseek-v4-pro",
-      "name": "DeepSeek V4 Pro (New-API)",
-      "vendor": "New-API",
-      "url": "${newapi_url}/v1/chat/completions",
-      "apiKey": "${newapi_key}",
-      "maxInputTokens": 1280000,
-      "maxOutputTokens": 81920,
-      "supportsToolCall": true,
-      "supportsImages": false
-    }
-  ],
-  "availableModels": [
-    "deepseek-v4-pro",
-    "deepseek-v4-flash",
-  ]
-}
-MODELS
-    chmod 600 /home/ubuntu/.codebuddy/models.json 2>/dev/null || true
-    echo "CodeBuddy models.json configured."
-}
-
-setup_codebuddy_models
-
-# 设置 selfhosted 模式，跳过 CodeBuddy 的登录流程
-export CODEBUDDY_INTERNET_ENVIRONMENT=selfhosted
-
-# 设置默认模型为 OmniRoute 的 deepseek-v4-flash
-cat > /home/ubuntu/.codebuddy/settings.json <<CODEBUDDY_SETTINGS
-{
-  "model": "custom-local:deepseek-v4-flash",
-  "sandbox": {
-    "enabled": false
-  }
-}
-CODEBUDDY_SETTINGS
-
 # 2. Multica 登录
 echo "准备设置Multica"
 if [ -n "$MULTICA_TOKEN" ]; then

@@ -20,7 +20,6 @@ RUN npm config set registry https://registry.npmmirror.com && \
     npm config set @tencent-ai:registry https://mirrors.tencent.com/npm/ && \
     npm install -g \
         @openai/codex \
-        @tencent-ai/codebuddy-code \
         @deepseek-ai/dsh \
         pnpm \
         reasonix \
