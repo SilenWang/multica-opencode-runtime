@@ -287,8 +287,8 @@ setup_codebuddy_models() {
       "vendor": "New-API",
       "url": "${newapi_url}/v1/chat/completions",
       "apiKey": "${newapi_key}",
-      "maxInputTokens": 128000,
-      "maxOutputTokens": 8192,
+      "maxInputTokens": 1280000,
+      "maxOutputTokens": 81920,
       "supportsToolCall": true,
       "supportsImages": false
     },
@@ -298,8 +298,8 @@ setup_codebuddy_models() {
       "vendor": "New-API",
       "url": "${newapi_url}/v1/chat/completions",
       "apiKey": "${newapi_key}",
-      "maxInputTokens": 128000,
-      "maxOutputTokens": 8192,
+      "maxInputTokens": 1280000,
+      "maxOutputTokens": 81920,
       "supportsToolCall": true,
       "supportsImages": false
     }
