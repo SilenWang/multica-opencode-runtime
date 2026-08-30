@@ -16,12 +16,15 @@ RUN curl -fsSL --connect-timeout 10 --max-time 120 \
     tar -xJf /tmp/node.tar.xz -C /usr/local --strip-components=1 && \
     rm /tmp/node.tar.xz
     
-RUN npm install -g @openai/codex && \
-    npm install -g @tencent-ai/codebuddy-code && \
-    npm install -g @deepseek-ai/dsh@0.1.0-rc.7 && \
-    npm install -g pnpm && \
-    npm install -g reasonix && \
-    npm cache clean --force
+RUN npm config set registry https://registry.npmmirror.com && \
+    npm config set @tencent-ai:registry https://mirrors.tencent.com/npm/ && \
+    npm install -g \
+        @openai/codex \
+        @tencent-ai/codebuddy-code \
+        @deepseek-ai/dsh \
+        pnpm \
+        reasonix \
+    && npm cache clean --force
 
 # 给unubtu sudo权限，方便后续agent可能要自己安装一些工具
 RUN echo "ubuntu ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/ubuntu \
