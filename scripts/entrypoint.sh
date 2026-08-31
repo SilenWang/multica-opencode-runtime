@@ -89,6 +89,19 @@ setup_dsh() {
     # provider 配置写入 $DSH_HOME/settings.yaml（参考 dsh providers 文档：Settings → Models）
     # 注意：所有自定义 provider 必须合并进单一 llm-pi-ai.providers 节点下，
     # 重复的顶层键会导致 DUPLICATE_KEY 使 dsh profile 加载失败（multica 无法检测到 dsh）
+    #
+    # llm-pi-ai 路由必须显式声明 requiresReasoningContentOnAssistantMessages：
+    # thinking mode 下上游要求把历史 assistant 消息的 reasoning_content 回传，而
+    # pi-ai 的 openai-completions 适配层按 "model.compat ?? baseURL 指纹识别" 决定
+    # 是否回传（@earendil-works/pi-ai dist/api/openai-completions.js:1201 → :924）。
+    # 指纹识别里的 isDeepSeek 只在 api.deepseek.com 命中（:1155），本项目的网关走
+    # 私有地址（默认 192.168.8.228）识别不到，deepseek-v4-pro 也不在 pi-ai 内置
+    # catalog 里 → 开关落为 false → 重放时漏传 → 上游 400 invalid_request_error。
+    # llm-deepseek 官方路由不受影响（dsh-llm-deepseek 序列化器无条件带该字段）。
+    # 个别网关的 thinking 参数格式不同或不需要回传时，用 .env 里的
+    # DSH_PIAI_THINKING_FORMAT / DSH_PIAI_REQUIRES_REASONING_CONTENT 覆盖。
+    DSH_PIAI_THINKING_FORMAT="${DSH_PIAI_THINKING_FORMAT:-deepseek}"
+    DSH_PIAI_REQUIRES_REASONING_CONTENT="${DSH_PIAI_REQUIRES_REASONING_CONTENT:-true}"
     {
         printf 'llm-deepseek:\n'
         printf '  apiKeyEnv: DEEPSEEK_API_KEY\n'
@@ -101,6 +114,9 @@ setup_dsh() {
             printf '      apiKeyEnv: OMNIROUTE_API_KEY\n'
             printf '      api: openai-completions\n'
             printf '      baseURL: "%s/v1"\n' "${OMNIROUTE_BASE_URL:-http://192.168.8.228:20128}"
+            printf '      compat:\n'
+            printf '        thinkingFormat: %s\n' "${DSH_PIAI_THINKING_FORMAT}"
+            printf '        requiresReasoningContentOnAssistantMessages: %s\n' "${DSH_PIAI_REQUIRES_REASONING_CONTENT}"
             printf '      models:\n        - id: deepseek-v4-flash\n        - id: deepseek-v4-pro\n'
         fi
         if [ -n "${NEW_API_TOKEN:-}" ]; then
@@ -111,6 +127,9 @@ setup_dsh() {
             printf '      apiKeyEnv: NEW_API_KEY\n'
             printf '      api: openai-completions\n'
             printf '      baseURL: "%s/v1"\n' "${NEW_API_BASE_URL:-http://192.168.8.228:3000}"
+            printf '      compat:\n'
+            printf '        thinkingFormat: %s\n' "${DSH_PIAI_THINKING_FORMAT}"
+            printf '        requiresReasoningContentOnAssistantMessages: %s\n' "${DSH_PIAI_REQUIRES_REASONING_CONTENT}"
             printf '      models:\n        - id: deepseek-v4-flash\n        - id: deepseek-v4-pro\n        - id: qwen3.8-flash\n'
         fi
     } > "${DSH_HOME}/settings.yaml"
