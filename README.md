@@ -91,14 +91,21 @@ OmniRoute 网关提供两个 DeepSeek 模型，Codex 中模型名映射关系如
 - 写入 `$DSH_HOME/settings.yaml`（默认 `~/.dsh/settings.yaml`）：
   - `llm-deepseek` — DeepSeek 官方 API，模型 `deepseek-v4-flash` / `deepseek-v4-pro`
   - `llm-pi-ai.providers.omniroute` — OmniRoute 网关（OpenAI-compatible，`api: openai-completions`）
-- 两条网关路由（`omniroute` / `new_api`）带路由级 `compat` 声明，用于修正 thinking mode：
-  `requiresReasoningContentOnAssistantMessages: true` + `thinkingFormat: deepseek`。
-  DeepSeek 在 thinking mode 下要求把历史 assistant 消息的 `reasoning_content` 回传，但 pi-ai 的
-  `openai-completions` 适配层只在「模型 catalog 条目声明」或「baseURL 指纹命中 `api.deepseek.com`」
-  时才回传；私有网关两者都不满足，于是请求被上游拒绝为
-  `400 invalid_request_error`。个别网关如需改用 `reasoning_effort` 或确认可省略回传，
-  用 `.env` 的 `DSH_PIAI_THINKING_FORMAT` / `DSH_PIAI_REQUIRES_REASONING_CONTENT` 覆盖
-  （`llm-deepseek` 官方路由不受影响，其序列化器本就无条件带该字段）。
+- 两条网关路由（`omniroute` 与默认名为 `opencode-go` 的 new-api 网关）带路由级 `compat`
+  声明（`requiresReasoningContentOnAssistantMessages: true` + `thinkingFormat: deepseek`），
+  且逐模型声明 `reasoningEfforts`；两者缺一不可 —— 不声明 `reasoningEfforts` 时
+  `model.reasoning` 为 `false`，`compat` 分支永不执行（`dsh --list-models` 里该模型不会出现
+  `thinking` 段）。可用 `DSH_PIAI_THINKING_FORMAT` / `DSH_PIAI_REQUIRES_REASONING_CONTENT` 覆盖。
+- **网关路由的 key 名是 thinking 能否工作的决定因素**：pi-ai 把流式响应里命中的字段名本身
+  当作 `thinkingSignature`，回放时又拿它当键名写出，因此网关若以 `reasoning` 字段返回思考，
+  真实文本会被写到非标准键 `reasoning`、而 `reasoning_content` 只剩空串，thinking 轮次随即被
+  上游拒为 `400 invalid_request_error`。pi-ai 只在 `model.provider === "opencode-go"` 时才把
+  该 signature 映射回标准键，而 dsh 直接拿路由 key 当 `model.provider` —— 所以这里把 new-api
+  路由默认命名为 `opencode-go`（`DSH_PIAI_NEWAPI_KEY` / `DSH_PIAI_OMNIROUTE_KEY` 可调整）。
+  两点代价：模型 id 前缀随之变为 `opencode-go/...`（需在模型选择器重选一次）；且**改名只对新开
+  会话生效**，旧会话历史里记的仍是 `new_api`，pi-ai 的 `isSameModel` 失配会把 thinking 块降级为
+  普通文本，thinking 依旧失败，需重开会话。`llm-deepseek` 官方路由不受影响（其序列化器无条件
+  带 `reasoning_content`）。这是命中上游特判的规避，正解应由 dsh/pi-ai 让该映射可配置。
 - 配置完成后运行 `dsh --profile multica --probe` 验证注册
 
 模型配置参考 dsh 官方文档：模型在 Web UI 的 Settings → Models 中配置，变更在下一个请求生效、无需重启服务；DeepSeek 卡片只暴露一个 API-key 字段，key 为 write-only，存储在 `$DSH_HOME/.credentials.yaml`（settings 仅保留 credential 引用）；也支持添加 catalog provider（如 Anthropic、OpenAI）或自定义 provider（小写 Provider ID + base URL + API 协议 + 凭证 + 至少一个模型，配置写入 `$DSH_HOME/settings.yaml`）。
