@@ -107,6 +107,34 @@ setup_dsh() {
     # 都带 `&& model.reasoning`（openai-completions.js:586 发 thinking 参数、:924 回传字段），
     # 所以只写 compat 而不声明 reasoningEfforts 是一份永不执行的死配置 ——
     # 表现为 `dsh --list-models` 里这些模型没有 thinking 段。这里逐模型声明档位。
+    # 路由 key 决定 model.provider（dsh-llm-pi-ai/lib/index.js:648），所以它能修掉
+    # 回传键名错配 —— 这是 thinking 报 400 的真正根因，上面两个 compat 开关都治不了：
+    # pi-ai 解析流式响应时把「命中的字段名本身」当 thinkingSignature
+    # （openai-completions.js:353-369，reasoningFields = reasoning_content|reasoning|
+    # reasoning_text）。本网关用 `reasoning` 字段返回思考 → signature = "reasoning"；
+    # 回放时拿 signature 当键名写（:869-876 `assistantMsg[signature] = <thinking 文本>`），
+    # 于是真实思考文本落在非标准键 `reasoning` 上，标准键 `reasoning_content` 只剩
+    # 上面开关补的空串 —— 与上游「thinking mode 必须回传 reasoning_content」的要求不符。
+    # 实测证据取自出错会话的持久化日志（~/.multica/dsh-sessions/.../session.jsonl.zstd）：
+    # assistant/message 的 source.replayState.blocks[0] = {type:"reasoning",
+    # thinkingSignature:"reasoning"}，provider 为 new_api。离线按同一形状重放
+    # （convertMessages）复现出 reasoning=<文本> + reasoning_content="" 的请求体。
+    # pi-ai 唯一的特判能把它映射回 reasoning_content（解析处 :366、回传处 :870），
+    # 条件是 `model.provider === "opencode-go"`。因此改名是命中该特判的规避，不是正解
+    # —— 正解需要 dsh/pi-ai 让该映射可配置（见 issue SIL-192）。
+    # ⚠ 只对改名之后开的**新会话**生效。pi-ai 的 transform-messages 用 isSameModel
+    # （历史消息记的 provider/api/model 与当前 model 比对）决定 thinking 块留不留：
+    # 旧会话里存的是 provider="new_api"，改名后 model.provider 变成 opencode-go，
+    # 两者不等 → thinking 块被降级成普通 text 塞进 content，reasoning_content 仍是
+    # 空串 → 照旧 400。所以改名后必须重开会话（旧的 VYB-xxx 任务对话不能续跑 thinking）。
+    # 代价：模型 id 前缀随之改变（new_api/deepseek-v4-pro → opencode-go/deepseek-v4-pro），
+    # 模型选择器里要重选一次。baseURL 不会被内置 catalog 的 opencode.ai 顶掉
+    # （index.js:637 `request.baseURL ?? base?.baseUrl`，配置值优先），已验证。
+    # providers 是一个 dict，同一个 llm-pi-ai 段里只能有一条路由叫 opencode-go，
+    # 因此默认只给实际出错的 new-api 网关这个帽子；要让 omniroute 走 thinking 就
+    # 互换两个变量（模型 id 前缀会跟着变，需在模型选择器里重选）。
+    DSH_PIAI_OMNIROUTE_KEY="${DSH_PIAI_OMNIROUTE_KEY:-omniroute}"
+    DSH_PIAI_NEWAPI_KEY="${DSH_PIAI_NEWAPI_KEY:-opencode-go}"
     DSH_PIAI_THINKING_FORMAT="${DSH_PIAI_THINKING_FORMAT:-deepseek}"
     DSH_PIAI_REQUIRES_REASONING_CONTENT="${DSH_PIAI_REQUIRES_REASONING_CONTENT:-true}"
     DSH_PIAI_MODEL_EFFORTS='          reasoningEfforts:
@@ -123,7 +151,7 @@ setup_dsh() {
         printf '    - id: deepseek-v4-flash\n'
         printf '    - id: deepseek-v4-pro\n'
         if [ -n "${OMNIROUTE_TOKEN:-}" ]; then
-            printf '\nllm-pi-ai:\n  providers:\n    omniroute:\n'
+            printf '\nllm-pi-ai:\n  providers:\n    %s:\n' "${DSH_PIAI_OMNIROUTE_KEY}"
             printf '      apiKeyEnv: OMNIROUTE_API_KEY\n'
             printf '      api: openai-completions\n'
             printf '      baseURL: "%s/v1"\n' "${OMNIROUTE_BASE_URL:-http://192.168.8.228:20128}"
@@ -140,7 +168,7 @@ setup_dsh() {
             if [ -z "${OMNIROUTE_TOKEN:-}" ]; then
                 printf '\nllm-pi-ai:\n  providers:\n'
             fi
-            printf '    new_api:\n'
+            printf '    %s:\n' "${DSH_PIAI_NEWAPI_KEY}"
             printf '      apiKeyEnv: NEW_API_KEY\n'
             printf '      api: openai-completions\n'
             printf '      baseURL: "%s/v1"\n' "${NEW_API_BASE_URL:-http://192.168.8.228:3000}"
