@@ -100,8 +100,21 @@ setup_dsh() {
     # llm-deepseek 官方路由不受影响（dsh-llm-deepseek 序列化器无条件带该字段）。
     # 个别网关的 thinking 参数格式不同或不需要回传时，用 .env 里的
     # DSH_PIAI_THINKING_FORMAT / DSH_PIAI_REQUIRES_REASONING_CONTENT 覆盖。
+    # reasoningEfforts 是 thinking 能力的开关本身，且 compat 开关的前置条件。
+    # dsh 的 resolveModelReasoning（dsh-llm-pi-ai/lib/index.js:537-539）在模型条目未声明
+    # reasoningEfforts 时回落到内置 catalog；omniroute / new_api 这类自定义路由名不在
+    # catalog 里，于是 reasoning 落为 false。pi-ai 消费上面两个 compat 开关的地方
+    # 都带 `&& model.reasoning`（openai-completions.js:586 发 thinking 参数、:924 回传字段），
+    # 所以只写 compat 而不声明 reasoningEfforts 是一份永不执行的死配置 ——
+    # 表现为 `dsh --list-models` 里这些模型没有 thinking 段。这里逐模型声明档位。
     DSH_PIAI_THINKING_FORMAT="${DSH_PIAI_THINKING_FORMAT:-deepseek}"
     DSH_PIAI_REQUIRES_REASONING_CONTENT="${DSH_PIAI_REQUIRES_REASONING_CONTENT:-true}"
+    DSH_PIAI_MODEL_EFFORTS='          reasoningEfforts:
+            off: null
+            low: low
+            high: high
+            max: max
+'
     {
         printf 'llm-deepseek:\n'
         printf '  apiKeyEnv: DEEPSEEK_API_KEY\n'
@@ -117,7 +130,11 @@ setup_dsh() {
             printf '      compat:\n'
             printf '        thinkingFormat: %s\n' "${DSH_PIAI_THINKING_FORMAT}"
             printf '        requiresReasoningContentOnAssistantMessages: %s\n' "${DSH_PIAI_REQUIRES_REASONING_CONTENT}"
-            printf '      models:\n        - id: deepseek-v4-flash\n        - id: deepseek-v4-pro\n'
+            printf '      models:\n'
+            printf '        - id: deepseek-v4-flash\n'
+            printf '%s' "${DSH_PIAI_MODEL_EFFORTS}"
+            printf '        - id: deepseek-v4-pro\n'
+            printf '%s' "${DSH_PIAI_MODEL_EFFORTS}"
         fi
         if [ -n "${NEW_API_TOKEN:-}" ]; then
             if [ -z "${OMNIROUTE_TOKEN:-}" ]; then
@@ -130,7 +147,12 @@ setup_dsh() {
             printf '      compat:\n'
             printf '        thinkingFormat: %s\n' "${DSH_PIAI_THINKING_FORMAT}"
             printf '        requiresReasoningContentOnAssistantMessages: %s\n' "${DSH_PIAI_REQUIRES_REASONING_CONTENT}"
-            printf '      models:\n        - id: deepseek-v4-flash\n        - id: deepseek-v4-pro\n        - id: qwen3.8-flash\n'
+            printf '      models:\n'
+            printf '        - id: deepseek-v4-flash\n'
+            printf '%s' "${DSH_PIAI_MODEL_EFFORTS}"
+            printf '        - id: deepseek-v4-pro\n'
+            printf '%s' "${DSH_PIAI_MODEL_EFFORTS}"
+            printf '        - id: qwen3.8-flash\n'
         fi
     } > "${DSH_HOME}/settings.yaml"
 
