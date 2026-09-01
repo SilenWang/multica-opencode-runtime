@@ -84,28 +84,27 @@ OmniRoute 网关提供两个 DeepSeek 模型，Codex 中模型名映射关系如
 
 ### dsh（DeepSeek Harness）
 
-容器启动时自动配置 dsh 接入 DeepSeek 官方 API 和 OmniRoute 网关：
+容器启动时自动配置 dsh 接入 DeepSeek 官方 API 和 new-api 网关（仅这两个 provider，其它均已去掉）：
 
 - 全局安装 `@deepseek-ai/dsh`（含 `dsh plugin --profile multica add dsh-profile-multica` 安装的 Multica 运行时 profile）
-- 将 `DEEPSEEK_TOKEN` 映射为 `DEEPSEEK_API_KEY`、`OMNIROUTE_TOKEN` 映射为 `OMNIROUTE_API_KEY`（在 daemon 启动前注入）
+- 将 `DEEPSEEK_TOKEN` 映射为 `DEEPSEEK_API_KEY`、`NEW_API_TOKEN` 映射为 `NEW_API_KEY`（在 daemon 启动前注入）
 - 写入 `$DSH_HOME/settings.yaml`（默认 `~/.dsh/settings.yaml`）：
   - `llm-deepseek` — DeepSeek 官方 API，模型 `deepseek-v4-flash` / `deepseek-v4-pro`
-  - `llm-pi-ai.providers.omniroute` — OmniRoute 网关（OpenAI-compatible，`api: openai-completions`）
-- 两条网关路由（`omniroute` 与默认名为 `opencode-go` 的 new-api 网关）带路由级 `compat`
-  声明（`requiresReasoningContentOnAssistantMessages: true` + `thinkingFormat: deepseek`），
-  且逐模型声明 `reasoningEfforts`；两者缺一不可 —— 不声明 `reasoningEfforts` 时
-  `model.reasoning` 为 `false`，`compat` 分支永不执行（`dsh --list-models` 里该模型不会出现
-  `thinking` 段）。可用 `DSH_PIAI_THINKING_FORMAT` / `DSH_PIAI_REQUIRES_REASONING_CONTENT` 覆盖。
-- **网关路由的 key 名是 thinking 能否工作的决定因素**：pi-ai 把流式响应里命中的字段名本身
-  当作 `thinkingSignature`，回放时又拿它当键名写出，因此网关若以 `reasoning` 字段返回思考，
-  真实文本会被写到非标准键 `reasoning`、而 `reasoning_content` 只剩空串，thinking 轮次随即被
-  上游拒为 `400 invalid_request_error`。pi-ai 只在 `model.provider === "opencode-go"` 时才把
-  该 signature 映射回标准键，而 dsh 直接拿路由 key 当 `model.provider` —— 所以这里把 new-api
-  路由默认命名为 `opencode-go`（`DSH_PIAI_NEWAPI_KEY` / `DSH_PIAI_OMNIROUTE_KEY` 可调整）。
-  两点代价：模型 id 前缀随之变为 `opencode-go/...`（需在模型选择器重选一次）；且**改名只对新开
-  会话生效**，旧会话历史里记的仍是 `new_api`，pi-ai 的 `isSameModel` 失配会把 thinking 块降级为
-  普通文本，thinking 依旧失败，需重开会话。`llm-deepseek` 官方路由不受影响（其序列化器无条件
-  带 `reasoning_content`）。这是命中上游特判的规避，正解应由 dsh/pi-ai 让该映射可配置。
+  - `llm-pi-ai.providers.new_api` — new-api 网关（OpenAI-compatible，`api: openai-completions`），模型 `deepseek-v4-flash` / `deepseek-v4-pro` / `qwen3.8-flash`
+- new-api 路由带路由级 `compat` 声明（`requiresReasoningContentOnAssistantMessages: true` +
+  `thinkingFormat: deepseek`），且逐模型声明 `reasoningEfforts`；两者缺一不可 —— 不声明
+  `reasoningEfforts` 时 `model.reasoning` 为 `false`，`compat` 分支永不执行（`dsh --list-models`
+  里该模型不会出现 `thinking` 段）。可用 `DSH_PIAI_THINKING_FORMAT` /
+  `DSH_PIAI_REQUIRES_REASONING_CONTENT` 覆盖。
+- **thinking 400 的真正根因与修复**：pi-ai 把流式响应里命中的字段名本身当作 `thinkingSignature`，
+  回放时又拿它当键名写出。网关以 `reasoning` 字段返回思考时，真实文本被写到非标准键 `reasoning`、
+  `reasoning_content` 只剩空串，thinking 轮次即被上游拒为 `400 invalid_request_error`。pi-ai 只对
+  `model.provider === "opencode-go"` 有映射回 `reasoning_content` 的特判；本项目不想改路由名
+  （保持 `new_api`），因此在镜像构建期对 pi-ai 打幂等 patch（`Dockerfile` →
+  `RUN node /scripts/patch-pi-ai.mjs`，见 `scripts/patch-pi-ai.mjs`），把该特判放宽为
+  `opencode-go || new_api`。注意：**patch 后需重开会话**（旧会话历史里若存了别的 provider 名，
+  `isSameModel` 失配会把 thinking 块降级为普通文本）。这是命中上游特判的规避，正解应由
+  dsh/pi-ai 让该映射可配置。
 - 配置完成后运行 `dsh --profile multica --probe` 验证注册
 
 模型配置参考 dsh 官方文档：模型在 Web UI 的 Settings → Models 中配置，变更在下一个请求生效、无需重启服务；DeepSeek 卡片只暴露一个 API-key 字段，key 为 write-only，存储在 `$DSH_HOME/.credentials.yaml`（settings 仅保留 credential 引用）；也支持添加 catalog provider（如 Anthropic、OpenAI）或自定义 provider（小写 Provider ID + base URL + API 协议 + 凭证 + 至少一个模型，配置写入 `$DSH_HOME/settings.yaml`）。

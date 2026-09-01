@@ -34,6 +34,11 @@ RUN if ! getent group docker > /dev/null 2>&1; then groupadd -r docker; fi \
     && usermod -aG docker ubuntu
 
 # 使用ubuntu，因为1000已经被使用 
+# 注意：patch pi-ai 必须在切到 ubuntu 之前（root 阶段）执行，
+# 因为 /usr/local/lib/node_modules 归 root 所有，ubuntu 无写权限。
+COPY scripts/patch-pi-ai.mjs /scripts/patch-pi-ai.mjs
+RUN node /scripts/patch-pi-ai.mjs
+
 USER ubuntu
 WORKDIR /home/ubuntu
 
