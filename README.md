@@ -8,6 +8,7 @@
 - 预装 multica（自动登录并启动 daemon）
 - 预装 opencode
 - 预装 Codex CLI（`@openai/codex`，含官方 DeepSeek 集成配置 + OmniRoute sol/luna 模型映射）
+- 预装 CLIProxyAPI（`cliproxyapi`，为 Codex 做 `responses` ↔ `chat/completions` 协议转换）
 - 预装 CodeBuddy CLI（`@tencent-ai/codebuddy-code`）
 - 预装 dsh（DeepSeek Harness，`@deepseek-ai/dsh`，含 Multica 运行时 profile）
 - 预装 Reasonix（含 DeepSeek 官方 API 配置）
@@ -59,7 +60,9 @@ GitHub 需要在容器启动后手动认证：使用`docker logs YOU_CONTAINER_N
 
 ### Codex CLI（默认接入 OmniRoute）
 
-容器启动时优先使用 `OMNIROUTE_TOKEN` 配置 Codex 接入 OmniRoute（`~/.codex/config.toml` + `~/.codex/models.json`，`wire_api = "responses"`），未设置时回退为官方 DeepSeek 集成直连 DeepSeek 官方 API（`wire_api = "responses"`），无需第三方 bridge。
+容器启动时优先使用 `OMNIROUTE_TOKEN` 配置 Codex 接入 OmniRoute（`~/.codex/config.toml` + `~/.codex/models.json`，`wire_api = "responses"`），未设置时回退为官方 DeepSeek 集成直连 DeepSeek 官方 API（`wire_api = "responses"`）。
+
+若所选上游不支持 `responses` 协议（典型如 new-api 网关只提供 `/v1/chat/completions`），容器会自动改走内置的 CLIProxyAPI 桥接，见下节。
 
 OmniRoute 网关提供两个 DeepSeek 模型，Codex 中模型名映射关系如下：
 
@@ -70,6 +73,32 @@ OmniRoute 网关提供两个 DeepSeek 模型，Codex 中模型名映射关系如
 - 模型目录 `models.json` 来自官方 DeepSeek 集成脚本（含 `base_instructions` 等字段，兼容 Codex CLI >= 0.144.0）
 
 配置完成后直接在任意项目目录运行 `codex` 即可使用。
+
+### CLIProxyAPI 桥接（上游不支持 responses 协议时）
+
+Codex CLI 只会说 OpenAI 的 `responses` 协议，而 new-api 这类网关只提供 `/v1/chat/completions`（`POST /v1/responses` 返回 404），直连必然失败。镜像内置 [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI) 做协议转换：
+
+```
+codex ──responses──> 127.0.0.1:8317 (CLIProxyAPI) ──chat/completions──> new-api
+```
+
+容器启动时 `setup_cliproxyapi` 会：
+
+1. 探测上游 `POST /v1/responses`：404/405/501 明确不支持时启用桥接；上游为 new-api 时 401/403 也启用（其鉴权早于路由匹配）；返回 200 或探测不通时保持原有直连，不改变既有行为；
+2. 生成 `~/.cli-proxy-api/config.yaml`（只绑 `127.0.0.1`，上游配在 `openai-compatibility` 下），拉起 `cliproxyapi` 并等 `/v1/models` 就绪（30s 超时，失败则回退直连）；
+3. 把 `~/.codex/config.toml` 的 `base_url` 指到 `http://127.0.0.1:8317/v1`，`experimental_bearer_token` 换成桥接自身的 key。
+
+相关环境变量（均有默认值，通常无需设置）：
+
+| 变量 | 默认 | 说明 |
+| --- | --- | --- |
+| `CLIPROXY_BRIDGE` | `auto` | `auto` 探测后启用 / `on` 强制启用 / `off` 禁用 |
+| `CLIPROXY_PORT` | `8317` | 桥接监听端口（仅 127.0.0.1） |
+| `CLIPROXY_HOME` | `/home/ubuntu/.cli-proxy-api` | 配置、auth 目录、日志、pid 所在位置 |
+| `CLIPROXY_API_KEY` | 自动生成 | 桥接访问 key，自动生成后持久化在 `$CLIPROXY_HOME/api_key` |
+| `CLIPROXY_MODELS` | 跟随上游 | 模型映射 `上游模型名:Codex侧名字`，逗号分隔，省略 `:别名` 时两边同名 |
+
+排查：`tail -f ~/.cli-proxy-api/logs/cliproxyapi.log`，或 `curl -s http://127.0.0.1:8317/v1/models -H "Authorization: Bearer $(cat ~/.cli-proxy-api/api_key)"`。
 
 ### CodeBuddy CLI
 
