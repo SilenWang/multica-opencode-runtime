@@ -75,6 +75,11 @@ RUN pixi global install -c https://prefix.dev/sylens opencode multica \
 # （daemon 只有在 dsh --profile multica --probe 成功后才注册 DeepSeek Harness）
 RUN dsh plugin --profile multica add dsh-profile-multica
 
+# dsh-llm-newapi：NewAPI 网关（OpenAI 兼容）的 dsh LLM provider 插件，
+# 负责 new-api 网关的模型发现与 thinking/reasoning 回传，无需改 dsh 本体。
+# 安装后需在 dsh web 设置面板 "NewAPI" 页填写 API key 与网关地址（含 /v1）。
+RUN dsh plugin --profile multica add dsh-llm-newapi
+
 COPY scripts/entrypoint.sh /entrypoint.sh
 COPY scripts/codex-models.json /codex-models.json
 
