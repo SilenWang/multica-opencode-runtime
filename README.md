@@ -43,10 +43,11 @@ GitHub 需要在容器启动后手动认证：使用`docker logs YOU_CONTAINER_N
 支持同时配置多个 provider 的 API key：
 
 - `DEEPSEEK_TOKEN` — DeepSeek API key
+- `NEW_API_TOKEN` — NewAPI 网关 API key（配合 `NEW_API_BASE_URL`，默认 `http://192.168.8.228:3000`）
 - `OPENCODE_GO_TOKEN` — OpenCode Go API key
 - `OMNIROUTE_TOKEN` — OmniRoute 网关 API key（配合 `OMNIROUTE_BASE_URL`，默认 `http://192.168.8.228:20128`）
 
-这些 key 会被写入 opencode `auth.json`，并同时用于 Codex（`~/.codex/`）、CodeBuddy（`~/.codebuddy/models.json`）、dsh（`DEEPSEEK_API_KEY`，NewAPI 网关凭证走 dsh Web UI 设置）和 Reasonix（`~/.reasonix/`）的配置，各程序可根据需要选择使用。
+这些 key 会被写入 opencode `auth.json`，并同时用于 Codex（`~/.codex/`）、CodeBuddy（`~/.codebuddy/models.json`）、dsh（`DEEPSEEK_API_KEY`，NewAPI 网关凭证自动写入 `$DSH_HOME/.credentials.yaml`）和 Reasonix（`~/.reasonix/`）的配置，各程序可根据需要选择使用。
 
 ### OmniRoute 网关
 
@@ -118,9 +119,10 @@ codex ──responses──> 127.0.0.1:8317 (CLIProxyAPI) ──chat/completions
 - 全局安装 `@deepseek-ai/dsh`（含 `dsh plugin --profile multica add dsh-profile-multica` 安装的 Multica 运行时 profile）
 - 安装 `dsh-llm-newapi` 插件（`dsh plugin --profile multica add dsh-llm-newapi`）—— NewAPI 网关的 LLM provider 插件，负责模型发现与 thinking/reasoning 回传，**不改动 dsh 本体**（上游 https://github.com/wenzetan/dsh-llm-newapi）
 - 将 `DEEPSEEK_TOKEN` 映射为 `DEEPSEEK_API_KEY`（在 daemon 启动前注入）
+- 将 `NEW_API_TOKEN` 写入 `$DSH_HOME/.credentials.yaml`（`refs.newapi: <key>`），供插件凭证解析；`NEW_API_BASE_URL`（或默认 `http://192.168.8.228:3000`/+`/v1`）导出为 `NEWAPI_BASE_URL` 环境变量——**headless 容器无需打开 Web UI，启动即用**
 - 配置完成后运行 `dsh --profile multica --probe` 验证注册
 
-NewAPI 网关的接入走 dsh Web UI 的 Settings → NewAPI 页：填 API key 与网关地址（含 `/v1` 前缀），点 "Fetch model info" 拉取模型列表后保存即可（插件密钥不读环境变量，只认设置页写入的凭证）。
+NewAPI 插件的 route id 为 `newapi`；模型通过 dsh Web UI Settings → NewAPI 页的 "Fetch model info" 拉取（也可在插件配置中预填模型列表）。凭证与端点已由 entrypoint 自动配置，启动后直接可用。
 
 模型配置参考 dsh 官方文档：模型在 Web UI 的 Settings → Models 中配置，变更在下一个请求生效、无需重启服务；DeepSeek 卡片只暴露一个 API-key 字段，key 为 write-only，存储在 `$DSH_HOME/.credentials.yaml`（settings 仅保留 credential 引用）；也支持添加 catalog provider（如 Anthropic、OpenAI）或自定义 provider（小写 Provider ID + base URL + API 协议 + 凭证 + 至少一个模型，配置写入 `$DSH_HOME/settings.yaml`）。
 

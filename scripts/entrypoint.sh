@@ -58,10 +58,10 @@ REASONIX_CONFIG
 
 setup_reasonix
 
-# 1.5 配置 dsh（DeepSeek Harness）：DEEPSEEK_API_KEY + settings.yaml（在 daemon 启动前完成）
+# 1.5 配置 dsh（DeepSeek Harness）：DEEPSEEK_API_KEY + NewAPI 插件凭证
 setup_dsh() {
-    if [ -z "${DEEPSEEK_TOKEN:-}" ] && [ -z "${OMNIROUTE_TOKEN:-}" ]; then
-        echo "WARNING: Neither DEEPSEEK_TOKEN nor OMNIROUTE_TOKEN set. dsh setup skipped."
+    if [ -z "${DEEPSEEK_TOKEN:-}" ] && [ -z "${NEW_API_TOKEN:-}" ]; then
+        echo "WARNING: Neither DEEPSEEK_TOKEN nor NEW_API_TOKEN set. dsh setup skipped."
         return
     fi
 
@@ -74,21 +74,31 @@ setup_dsh() {
         echo "Installing dsh multica profile..."
         dsh plugin --profile multica add dsh-profile-multica || echo "WARNING: dsh multica profile install failed."
     fi
+    # dsh-llm-newapi 插件（镜像构建时已安装；缺失时补装）
+    if [ ! -d "${DSH_HOME}/profiles/multica/node_modules/dsh-llm-newapi" ]; then
+        echo "Installing dsh-llm-newapi plugin..."
+        dsh plugin --profile multica add dsh-llm-newapi || echo "WARNING: dsh-llm-newapi install failed."
+    fi
 
-    # provider 凭证：dsh 通过 apiKeyEnv 从环境变量解析
+    # DeepSeek 官方 API 凭证
     if [ -n "${DEEPSEEK_TOKEN:-}" ]; then
         export DEEPSEEK_API_KEY="${DEEPSEEK_TOKEN}"
     fi
-    if [ -n "${OMNIROUTE_TOKEN:-}" ]; then
-        export OMNIROUTE_API_KEY="${OMNIROUTE_TOKEN}"
-    fi
+
+    # NewAPI 网关（dsh-llm-newapi 插件）：baseURL 走 NEWAPI_BASE_URL（trusted env layer），
+    # API key 写 $DSH_HOME/.credentials.yaml 的 refs.newapi（插件固定 ref "newapi"，
+    # 不读环境变量，headless 容器无需打开 Web UI 设置页）
     if [ -n "${NEW_API_TOKEN:-}" ]; then
-        export NEW_API_KEY="${NEW_API_TOKEN}"
+        export NEWAPI_BASE_URL="${NEW_API_BASE_URL:-http://192.168.8.228:3000}/v1"
+        cat > "${DSH_HOME}/.credentials.yaml" << DSH_CREDENTIALS
+version: 1
+refs:
+  newapi: ${NEW_API_TOKEN}
+DSH_CREDENTIALS
+        chmod 600 "${DSH_HOME}/.credentials.yaml"
     fi
 
-    # provider 配置写入 $DSH_HOME/settings.yaml（参考 dsh providers 文档：Settings → Models）
-    # 注意：所有自定义 provider 必须合并进单一 llm-pi-ai.providers 节点下，
-    # 重复的顶层键会导致 DUPLICATE_KEY 使 dsh profile 加载失败（multica 无法检测到 dsh）
+    # provider 配置写入 $DSH_HOME/settings.yaml
     {
         printf 'llm-deepseek:\n'
         printf '  apiKeyEnv: DEEPSEEK_API_KEY\n'
@@ -96,25 +106,7 @@ setup_dsh() {
         printf '  models:\n'
         printf '    - id: deepseek-v4-flash\n'
         printf '    - id: deepseek-v4-pro\n'
-        if [ -n "${OMNIROUTE_TOKEN:-}" ]; then
-            printf '\nllm-pi-ai:\n  providers:\n    omniroute:\n'
-            printf '      apiKeyEnv: OMNIROUTE_API_KEY\n'
-            printf '      api: openai-completions\n'
-            printf '      baseURL: "%s/v1"\n' "${OMNIROUTE_BASE_URL:-http://192.168.8.228:20128}"
-            printf '      models:\n        - id: deepseek-v4-flash\n        - id: deepseek-v4-pro\n'
-        fi
-        if [ -n "${NEW_API_TOKEN:-}" ]; then
-            if [ -z "${OMNIROUTE_TOKEN:-}" ]; then
-                printf '\nllm-pi-ai:\n  providers:\n'
-            fi
-            printf '    new_api:\n'
-            printf '      apiKeyEnv: NEW_API_KEY\n'
-            printf '      api: openai-completions\n'
-            printf '      baseURL: "%s/v1"\n' "${NEW_API_BASE_URL:-http://192.168.8.228:3000}"
-            printf '      models:\n        - id: deepseek-v4-flash\n        - id: deepseek-v4-pro\n        - id: qwen3.8-flash\n'
-        fi
     } > "${DSH_HOME}/settings.yaml"
-
     chmod 600 "${DSH_HOME}/settings.yaml" 2>/dev/null || true
 
     # 守护进程只有在 dsh --profile multica --probe 成功后才注册 DeepSeek Harness
