@@ -74,10 +74,21 @@ setup_dsh() {
         echo "Installing dsh multica profile..."
         dsh plugin --profile multica add dsh-profile-multica || echo "WARNING: dsh multica profile install failed."
     fi
-    # dsh-llm-newapi 插件（镜像构建时已安装；缺失时补装）
-    if [ ! -d "${DSH_HOME}/profiles/multica/node_modules/dsh-llm-newapi" ]; then
-        echo "Installing dsh-llm-newapi plugin..."
-        dsh plugin --profile multica add dsh-llm-newapi || echo "WARNING: dsh-llm-newapi install failed."
+    # dsh-llm-newapi 插件（镜像构建时已安装；缺失或版本不匹配时补装/升级）
+    # dsh 与插件是硬兼容配对：插件 npm latest 仍停在为旧 0.1.1 seam 构建的 0.8.4，
+    # 它从 @deepseek-ai/dsh-settings 导入 deepEqualJson（该导出在 dsh >= 0.1.2 已
+    # 迁到 @deepseek-ai/dsh-util-values），在新 dsh 上 ESM link 期即失败、整个
+    # profile 树加载不了，`dsh --probe` 直接报错。故按 DSH_LLM_NEWAPI_VERSION 校验。
+    DSH_LLM_NEWAPI_VERSION="${DSH_LLM_NEWAPI_VERSION:-0.8.6-rc.1}"
+    local newapi_pkg="${DSH_HOME}/profiles/multica/node_modules/dsh-llm-newapi/package.json"
+    local installed_newapi=""
+    if [ -f "${newapi_pkg}" ]; then
+        installed_newapi=$(node -p "require('${newapi_pkg}').version" 2>/dev/null || true)
+    fi
+    if [ "${installed_newapi}" != "${DSH_LLM_NEWAPI_VERSION}" ]; then
+        echo "Installing dsh-llm-newapi@${DSH_LLM_NEWAPI_VERSION} (found: ${installed_newapi:-none})..."
+        dsh plugin --profile multica add "dsh-llm-newapi@${DSH_LLM_NEWAPI_VERSION}" \
+            || echo "WARNING: dsh-llm-newapi install failed."
     fi
 
     # DeepSeek 官方 API 凭证
@@ -85,11 +96,14 @@ setup_dsh() {
         export DEEPSEEK_API_KEY="${DEEPSEEK_TOKEN}"
     fi
 
-    # NewAPI 网关（dsh-llm-newapi 插件）：baseURL 走 NEWAPI_BASE_URL（trusted env layer），
+    # NewAPI 网关（dsh-llm-newapi 插件）：baseURL 写 settings.yaml 的 llm-newapi 段，
     # API key 写 $DSH_HOME/.credentials.yaml 的 refs.newapi（插件固定 ref "newapi"，
     # 不读环境变量，headless 容器无需打开 Web UI 设置页）
+    NEWAPI_BASE_URL_VALUE=""
     if [ -n "${NEW_API_TOKEN:-}" ]; then
-        export NEWAPI_BASE_URL="${NEW_API_BASE_URL:-http://192.168.8.228:3000}/v1"
+        NEWAPI_BASE_URL_VALUE="${NEW_API_BASE_URL:-http://192.168.8.228:3000}"
+        NEWAPI_BASE_URL_VALUE="${NEWAPI_BASE_URL_VALUE%/}/v1"
+        export NEWAPI_BASE_URL="${NEWAPI_BASE_URL_VALUE}"
         cat > "${DSH_HOME}/.credentials.yaml" << DSH_CREDENTIALS
 version: 1
 refs:
@@ -99,6 +113,9 @@ DSH_CREDENTIALS
     fi
 
     # provider 配置写入 $DSH_HOME/settings.yaml
+    # llm-newapi 段必须显式列出模型：插件默认 models: []，headless 下没有 Web UI
+    # 的 "Fetch model info" 触发发现；并需声明 reasoningEfforts，thinking 档位才会
+    # 出现、请求才携带 reasoning 参数、回传 reasoning_content。
     {
         printf 'llm-deepseek:\n'
         printf '  apiKeyEnv: DEEPSEEK_API_KEY\n'
@@ -106,6 +123,18 @@ DSH_CREDENTIALS
         printf '  models:\n'
         printf '    - id: deepseek-v4-flash\n'
         printf '    - id: deepseek-v4-pro\n'
+        if [ -n "${NEWAPI_BASE_URL_VALUE}" ]; then
+            printf 'llm-newapi:\n'
+            printf '  baseURL: %s\n' "${NEWAPI_BASE_URL_VALUE}"
+            printf '  models:\n'
+            printf '    - id: deepseek-v4-flash\n'
+            printf '      reasoningEfforts: [off, low, high, max]\n'
+            printf '      defaultReasoningEffort: high\n'
+            printf '    - id: deepseek-v4-pro\n'
+            printf '      reasoningEfforts: [off, low, high, max]\n'
+            printf '      defaultReasoningEffort: high\n'
+            printf '    - id: qwen3.8-flash\n'
+        fi
     } > "${DSH_HOME}/settings.yaml"
     chmod 600 "${DSH_HOME}/settings.yaml" 2>/dev/null || true
 

@@ -116,13 +116,14 @@ codex ──responses──> 127.0.0.1:8317 (CLIProxyAPI) ──chat/completions
 
 容器启动时自动配置 dsh 接入 DeepSeek 官方 API 和 NewAPI 网关：
 
-- 全局安装 `@deepseek-ai/dsh`（含 `dsh plugin --profile multica add dsh-profile-multica` 安装的 Multica 运行时 profile）
-- 安装 `dsh-llm-newapi` 插件（`dsh plugin --profile multica add dsh-llm-newapi`）—— NewAPI 网关的 LLM provider 插件，负责模型发现与 thinking/reasoning 回传，**不改动 dsh 本体**（上游 https://github.com/wenzetan/dsh-llm-newapi）
+- 全局安装 `@deepseek-ai/dsh`（版本锁定在 `DSH_VERSION`，含 `dsh plugin --profile multica add dsh-profile-multica` 安装的 Multica 运行时 profile）
+- 安装 `dsh-llm-newapi` 插件（版本锁定在 `DSH_LLM_NEWAPI_VERSION`）—— NewAPI 网关的 LLM provider 插件，负责模型发现与 thinking/reasoning 回传，**不改动 dsh 本体**（上游 https://github.com/wenzetan/dsh-llm-newapi）
+  - dsh 与插件是**硬兼容配对**，两个版本必须一起锁：dsh 走 npm `latest` 会自动前进，但插件的 npm `latest` 仍停在为旧 0.1.1 seam 构建的 `0.8.4`（它从 `@deepseek-ai/dsh-settings` 导入 `deepEqualJson`，该导出在 dsh ≥ 0.1.2 已迁到 `@deepseek-ai/dsh-util-values`），一旦 dsh 更新而插件未更新，插件会在 ESM link 期抛错、整个 profile 树加载失败，`dsh --probe` 报错。当前配对：dsh `0.1.5-rc.1` + 插件 `0.8.6-rc.1`（npm `next`）。升级 dsh 时须同步确认插件的兼容版本（见插件仓库 "Version compatibility"）。
 - 将 `DEEPSEEK_TOKEN` 映射为 `DEEPSEEK_API_KEY`（在 daemon 启动前注入）
-- 将 `NEW_API_TOKEN` 写入 `$DSH_HOME/.credentials.yaml`（`refs.newapi: <key>`），供插件凭证解析；`NEW_API_BASE_URL`（或默认 `http://192.168.8.228:3000`/+`/v1`）导出为 `NEWAPI_BASE_URL` 环境变量——**headless 容器无需打开 Web UI，启动即用**
+- 将 `NEW_API_TOKEN` 写入 `$DSH_HOME/.credentials.yaml`（`refs.newapi: <key>`），供插件凭证解析；端点写入 `$DSH_HOME/settings.yaml` 的 `llm-newapi.baseURL`（`NEW_API_BASE_URL`，默认 `http://192.168.8.228:3000`，自动补 `/v1`）——**headless 容器无需打开 Web UI，启动即用**
 - 配置完成后运行 `dsh --profile multica --probe` 验证注册
 
-NewAPI 插件的 route id 为 `newapi`；模型通过 dsh Web UI Settings → NewAPI 页的 "Fetch model info" 拉取（也可在插件配置中预填模型列表）。凭证与端点已由 entrypoint 自动配置，启动后直接可用。
+NewAPI 插件的 route id 为 `newapi`。headless 下 entrypoint 已在 `$DSH_HOME/settings.yaml` 的 `llm-newapi` 段预填 `baseURL` 与模型列表（`deepseek-v4-flash` / `deepseek-v4-pro` 声明 `reasoningEfforts`，`qwen3.8-flash`）；插件默认 `models: []`，不预填则没有 Web UI 的 "Fetch model info" 触发发现，路由会是空的。也可在 dsh Web UI Settings → NewAPI 页用 "Fetch model info" 覆盖。
 
 模型配置参考 dsh 官方文档：模型在 Web UI 的 Settings → Models 中配置，变更在下一个请求生效、无需重启服务；DeepSeek 卡片只暴露一个 API-key 字段，key 为 write-only，存储在 `$DSH_HOME/.credentials.yaml`（settings 仅保留 credential 引用）；也支持添加 catalog provider（如 Anthropic、OpenAI）或自定义 provider（小写 Provider ID + base URL + API 协议 + 凭证 + 至少一个模型，配置写入 `$DSH_HOME/settings.yaml`）。
 

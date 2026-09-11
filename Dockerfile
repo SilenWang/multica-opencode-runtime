@@ -16,11 +16,21 @@ RUN curl -fsSL --connect-timeout 10 --max-time 120 \
     tar -xJf /tmp/node.tar.xz -C /usr/local --strip-components=1 && \
     rm /tmp/node.tar.xz
     
+# dsh 与 dsh-llm-newapi 是硬兼容配对，两个版本必须一起锁。
+# dsh 走 npm latest（会自动前进），但 dsh-llm-newapi 的 npm latest 仍停在
+# 为旧 0.1.1 seam 构建的 0.8.4：它从 @deepseek-ai/dsh-settings 导入
+# deepEqualJson，而该导出在 dsh >= 0.1.2 已迁移到 @deepseek-ai/dsh-util-values，
+# 于是插件在 ESM link 期直接抛错、整个 profile 树加载失败，`dsh --probe` 报错。
+# 0.8.6-rc.1（npm next）才是面向 dsh >= 0.1.2-rc.1 的构建。
+# 升级 dsh 时必须同步确认 dsh-llm-newapi 的兼容版本并一起改这两个值。
+# 参见 https://github.com/wenzetan/dsh-llm-newapi 的 "Version compatibility"。
+ENV DSH_VERSION=0.1.5-rc.1 \
+    DSH_LLM_NEWAPI_VERSION=0.8.6-rc.1
 RUN npm config set registry https://registry.npmmirror.com && \
     npm config set @tencent-ai:registry https://mirrors.tencent.com/npm/ && \
     npm install -g \
         @openai/codex \
-        @deepseek-ai/dsh \
+        "@deepseek-ai/dsh@${DSH_VERSION}" \
         pnpm \
         reasonix \
     && npm cache clean --force
@@ -77,8 +87,9 @@ RUN dsh plugin --profile multica add dsh-profile-multica
 
 # dsh-llm-newapi：NewAPI 网关（OpenAI 兼容）的 dsh LLM provider 插件，
 # 负责 new-api 网关的模型发现与 thinking/reasoning 回传，无需改 dsh 本体。
-# 安装后需在 dsh web 设置面板 "NewAPI" 页填写 API key 与网关地址（含 /v1）。
-RUN dsh plugin --profile multica add dsh-llm-newapi
+# 必须用与 DSH_VERSION 配套的版本（见上方 ENV 注释）；headless 端点与凭证由
+# entrypoint 写入 $DSH_HOME，无需打开 dsh web 设置页。
+RUN dsh plugin --profile multica add "dsh-llm-newapi@${DSH_LLM_NEWAPI_VERSION}"
 
 COPY scripts/entrypoint.sh /entrypoint.sh
 COPY scripts/codex-models.json /codex-models.json
