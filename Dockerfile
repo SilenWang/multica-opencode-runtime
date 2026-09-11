@@ -26,6 +26,14 @@ RUN curl -fsSL --connect-timeout 10 --max-time 120 \
 # 参见 https://github.com/wenzetan/dsh-llm-newapi 的 "Version compatibility"。
 ENV DSH_VERSION=0.1.5-rc.1 \
     DSH_LLM_NEWAPI_VERSION=0.8.6-rc.1
+
+# dsh 的 @deepseek-ai/dsh-subprocess 会清洗子进程环境，删掉名字含
+# KEY/PASSWORD/SECRET/TOKEN 的变量（MULTICA_TOKEN 命中 TOKEN），导致 dsh 的 bash
+# 工具里没有 Multica 任务令牌，multica CLI 报
+# "agent execution context requires MULTICA_TOKEN to be a task-scoped mat_ token"。
+# 这是 Multica 文档里“会过滤子进程环境的工具需要显式放行”的情形（Codex 由 daemon
+# 的 managed shell policy 放行）；dsh 无放行配置，故在构建期做一处幂等 patch。
+COPY scripts/patch-dsh-env.mjs /tmp/patch-dsh-env.mjs
 RUN npm config set registry https://registry.npmmirror.com && \
     npm config set @tencent-ai:registry https://mirrors.tencent.com/npm/ && \
     npm install -g \
@@ -33,6 +41,8 @@ RUN npm config set registry https://registry.npmmirror.com && \
         "@deepseek-ai/dsh@${DSH_VERSION}" \
         pnpm \
         reasonix \
+    && node /tmp/patch-dsh-env.mjs \
+    && rm -f /tmp/patch-dsh-env.mjs \
     && npm cache clean --force
 
 # CLIProxyAPI：协议转换网关，把 Codex 的 OpenAI `responses` 协议翻译成上游

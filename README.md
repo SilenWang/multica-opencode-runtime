@@ -121,6 +121,7 @@ codex ──responses──> 127.0.0.1:8317 (CLIProxyAPI) ──chat/completions
   - dsh 与插件是**硬兼容配对**，两个版本必须一起锁：dsh 走 npm `latest` 会自动前进，但插件的 npm `latest` 仍停在为旧 0.1.1 seam 构建的 `0.8.4`（它从 `@deepseek-ai/dsh-settings` 导入 `deepEqualJson`，该导出在 dsh ≥ 0.1.2 已迁到 `@deepseek-ai/dsh-util-values`），一旦 dsh 更新而插件未更新，插件会在 ESM link 期抛错、整个 profile 树加载失败，`dsh --probe` 报错。当前配对：dsh `0.1.5-rc.1` + 插件 `0.8.6-rc.1`（npm `next`）。升级 dsh 时须同步确认插件的兼容版本（见插件仓库 "Version compatibility"）。
 - 将 `DEEPSEEK_TOKEN` 映射为 `DEEPSEEK_API_KEY`（在 daemon 启动前注入）
 - 将 `NEW_API_TOKEN` 写入 `$DSH_HOME/.credentials.yaml`（`refs.newapi: <key>`），供插件凭证解析；端点写入 `$DSH_HOME/settings.yaml` 的 `llm-newapi.baseURL`（`NEW_API_BASE_URL`，默认 `http://192.168.8.228:3000`，自动补 `/v1`）——**headless 容器无需打开 Web UI，启动即用**
+- 构建期给 dsh 打一处幂等 patch（`scripts/patch-dsh-env.mjs`）：`@deepseek-ai/dsh-subprocess` 会清洗子进程环境，删掉名字含 `KEY`/`PASSWORD`/`SECRET`/`TOKEN` 的变量（`MULTICA_TOKEN` 命中 `TOKEN`），导致 dsh 的 bash 工具里没有任务令牌，multica CLI 报 `agent execution context requires MULTICA_TOKEN to be a task-scoped mat_ token`。patch 把 `MULTICA_TOKEN` 从清洗规则里豁免。Multica 文档明确这类“会过滤自身子进程环境的工具需要显式放行”（Codex 由 daemon 的 managed shell policy 放行）；dsh 无放行配置，只能改本体。**升级 dsh 后需重新确认该 patch 是否仍匹配**（脚本找不到目标只告警不失败）。
 - 配置完成后运行 `dsh --profile multica --probe` 验证注册
 
 NewAPI 插件的 route id 为 `newapi`。headless 下 entrypoint 已在 `$DSH_HOME/settings.yaml` 的 `llm-newapi` 段预填 `baseURL` 与模型列表（`deepseek-v4-flash` / `deepseek-v4-pro` 声明 `reasoningEfforts`，`qwen3.8-flash`）；插件默认 `models: []`，不预填则没有 Web UI 的 "Fetch model info" 触发发现，路由会是空的。也可在 dsh Web UI Settings → NewAPI 页用 "Fetch model info" 覆盖。
