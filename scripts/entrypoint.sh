@@ -59,10 +59,6 @@ if [ -n "$DEEPSEEK_TOKEN" ]; then
     if [ "$FIRST" = true ]; then FIRST=false; else AUTH_JSON+=", "; fi
     AUTH_JSON+="\"deepseek\": {\"type\": \"api\", \"key\": \"${DEEPSEEK_TOKEN}\"}"
 fi
-if [ -n "$OPENCODE_GO_TOKEN" ]; then
-    if [ "$FIRST" = true ]; then FIRST=false; else AUTH_JSON+=", "; fi
-    AUTH_JSON+="\"opencode-go\": {\"type\": \"api\", \"key\": \"${OPENCODE_GO_TOKEN}\"}"
-fi
 if [ -n "$NEW_API_TOKEN" ]; then
     if [ "$FIRST" = true ]; then FIRST=false; else AUTH_JSON+=", "; fi
     AUTH_JSON+="\"newapi\": {\"type\": \"api\", \"key\": \"${NEW_API_TOKEN}\"}"

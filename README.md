@@ -42,7 +42,6 @@ GitHub 需要在容器启动后手动认证：使用`docker logs YOU_CONTAINER_N
 支持同时配置多个 provider 的 API key：
 
 - `DEEPSEEK_TOKEN` — DeepSeek API key
-- `OPENCODE_GO_TOKEN` — OpenCode Go API key
 - `NEW_API_TOKEN` — New-API 网关 API key（配合 `NEW_API_BASE_URL`，默认 `http://192.168.8.228:3000`）
 
 这些 key 会被写入 opencode `auth.json`，并同时用于 Codex（`~/.codex/`）、CodeBuddy（`~/.codebuddy/models.json`）和 Reasonix（`~/.reasonix/`）的配置，各程序可根据需要选择使用。
@@ -86,11 +85,10 @@ codex ──responses──> 127.0.0.1:8317 (CLIProxyAPI) ──chat/completions
 
 ### CodeBuddy CLI
 
-容器启动时自动生成 `~/.codebuddy/models.json`，包含三个模型：
+容器启动时自动生成 `~/.codebuddy/models.json`，包含两个模型：
 
 - `deepseek-v4-pro` — DeepSeek API
 - `deepseek-v4-flash` — DeepSeek API
-- `opencode-go` — OpenCode Go API（使用 `OPENCODE_GO_TOKEN` 和 `OPENCODE_GO_BASE_URL`）
 
 配置完成后直接在任意项目目录运行 `codebuddy` 即可使用。
 
