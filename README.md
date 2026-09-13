@@ -7,10 +7,9 @@
 - 基于 pixi 官方镜像（`ghcr.io/prefix-dev/pixi:0.76.1-noble-cuda-13.0.0`，Ubuntu Noble + CUDA 13.0.0），预装 pixi 包管理器
 - 预装 multica（自动登录并启动 daemon）
 - 预装 opencode
-- 预装 Codex CLI（`@openai/codex`，含官方 DeepSeek 集成配置 + OmniRoute sol/luna 模型映射）
+- 预装 Codex CLI（`@openai/codex`，含官方 DeepSeek / New-API 集成配置）
 - 预装 CLIProxyAPI（`cliproxyapi`，为 Codex 做 `responses` ↔ `chat/completions` 协议转换）
 - 预装 CodeBuddy CLI（`@tencent-ai/codebuddy-code`）
-- 预装 dsh（DeepSeek Harness，`@deepseek-ai/dsh`，含 Multica 运行时 profile）
 - 预装 Reasonix（含 DeepSeek 官方 API 配置）
 - 预装 Node.js v22（`v22.23.2`）
 - 已安装 GitHub CLI (gh)
@@ -43,34 +42,19 @@ GitHub 需要在容器启动后手动认证：使用`docker logs YOU_CONTAINER_N
 支持同时配置多个 provider 的 API key：
 
 - `DEEPSEEK_TOKEN` — DeepSeek API key
-- `OPENCODE_GO_TOKEN` — OpenCode Go API key
-- `OMNIROUTE_TOKEN` — OmniRoute 网关 API key（配合 `OMNIROUTE_BASE_URL`，默认 `http://192.168.8.228:20128`）
+- `NEW_API_TOKEN` — New-API 网关 API key（配合 `NEW_API_BASE_URL`，默认 `http://192.168.8.228:3000`）
 
-这些 key 会被写入 opencode `auth.json`，并同时用于 Codex（`~/.codex/`）、CodeBuddy（`~/.codebuddy/models.json`）、dsh（`$DSH_HOME/settings.yaml` + `DEEPSEEK_API_KEY`）和 Reasonix（`~/.reasonix/`）的配置，各程序可根据需要选择使用。
+这些 key 会被写入 opencode `auth.json`，并同时用于 Codex（`~/.codex/`）、CodeBuddy（`~/.codebuddy/models.json`）和 Reasonix（`~/.reasonix/`）的配置，各程序可根据需要选择使用。
 
-### OmniRoute 网关
+### Codex CLI（默认接入 New-API）
 
-引入自定义 OmniRoute 网关作为 provider：
-
-- `OMNIROUTE_TOKEN` — OmniRoute API key
-- `OMNIROUTE_BASE_URL` — 网关地址，默认 `http://192.168.8.228:20128`
-- **Codex** 默认接入 OmniRoute（`wire_api = "responses"`，默认模型 `deepseek-v4-flash`，即 luna）
-- **opencode** 将 OmniRoute 作为额外 provider（`omniroute/*`），默认模型仍为 `deepseek/deepseek-v4-flash`
-- 未设置 `OMNIROUTE_TOKEN` 时，Codex 回退为 DeepSeek 官方直连
-
-### Codex CLI（默认接入 OmniRoute）
-
-容器启动时优先使用 `OMNIROUTE_TOKEN` 配置 Codex 接入 OmniRoute（`~/.codex/config.toml` + `~/.codex/models.json`，`wire_api = "responses"`），未设置时回退为官方 DeepSeek 集成直连 DeepSeek 官方 API（`wire_api = "responses"`）。
+容器启动时优先使用 `NEW_API_TOKEN` 配置 Codex 接入 New-API 网关（`~/.codex/config.toml` + `~/.codex/models.json`，`wire_api = "responses"`），未设置时回退为官方 DeepSeek 集成直连 DeepSeek 官方 API（`wire_api = "responses"`）。
 
 若所选上游不支持 `responses` 协议（典型如 new-api 网关只提供 `/v1/chat/completions`），容器会自动改走内置的 CLIProxyAPI 桥接，见下节。
 
-OmniRoute 网关提供两个 DeepSeek 模型，Codex 中模型名映射关系如下：
-
-- `sol` ↔ `deepseek-v4-pro`（pro 档位）
-- `luna` ↔ `deepseek-v4-flash`（flash 档位，默认）
-
-- 默认模型：`deepseek-v4-flash`（luna）
+- 默认模型：`deepseek-v4-flash`
 - 模型目录 `models.json` 来自官方 DeepSeek 集成脚本（含 `base_instructions` 等字段，兼容 Codex CLI >= 0.144.0）
+- `deepseek-v4-flash` 已声明多模态输入（`input_modalities` 含 `image`），可直接用 `codex -i <图片>` 附加图片，经 CLIProxyAPI 桥接透传给上游
 
 配置完成后直接在任意项目目录运行 `codex` 即可使用。
 
@@ -102,41 +86,23 @@ codex ──responses──> 127.0.0.1:8317 (CLIProxyAPI) ──chat/completions
 
 ### CodeBuddy CLI
 
-容器启动时自动生成 `~/.codebuddy/models.json`，包含四个模型：
+容器启动时自动生成 `~/.codebuddy/models.json`，包含以下模型：
 
-- `deepseek-v4-pro` — DeepSeek API
 - `deepseek-v4-flash` — DeepSeek API
-- `deepseek-v4-flash-omniroute` — OmniRoute 网关（`OMNIROUTE_TOKEN`）
-- `opencode-go` — OpenCode Go API（使用 `OPENCODE_GO_TOKEN` 和 `OPENCODE_GO_BASE_URL`）
 
 配置完成后直接在任意项目目录运行 `codebuddy` 即可使用。
 
-### dsh（DeepSeek Harness）
-
-容器启动时自动配置 dsh 接入 DeepSeek 官方 API 和 OmniRoute 网关：
-
-- 全局安装 `@deepseek-ai/dsh`（含 `dsh plugin --profile multica add dsh-profile-multica` 安装的 Multica 运行时 profile）
-- 将 `DEEPSEEK_TOKEN` 映射为 `DEEPSEEK_API_KEY`、`OMNIROUTE_TOKEN` 映射为 `OMNIROUTE_API_KEY`（在 daemon 启动前注入）
-- 写入 `$DSH_HOME/settings.yaml`（默认 `~/.dsh/settings.yaml`）：
-  - `llm-deepseek` — DeepSeek 官方 API，模型 `deepseek-v4-flash` / `deepseek-v4-pro`
-  - `llm-pi-ai.providers.omniroute` — OmniRoute 网关（OpenAI-compatible，`api: openai-completions`）
-- 配置完成后运行 `dsh --profile multica --probe` 验证注册
-
-模型配置参考 dsh 官方文档：模型在 Web UI 的 Settings → Models 中配置，变更在下一个请求生效、无需重启服务；DeepSeek 卡片只暴露一个 API-key 字段，key 为 write-only，存储在 `$DSH_HOME/.credentials.yaml`（settings 仅保留 credential 引用）；也支持添加 catalog provider（如 Anthropic、OpenAI）或自定义 provider（小写 Provider ID + base URL + API 协议 + 凭证 + 至少一个模型，配置写入 `$DSH_HOME/settings.yaml`）。
-
-使用方式：在任意项目目录运行 `dsh --profile multica --stdio` 对接 Multica 执行任务，或 `dsh web` 开启 Web UI。
-
 ### Reasonix 模型设置
 
-容器启动时自动配置 Reasonix 同时接入 DeepSeek 官方和 OmniRoute，写入 `~/.reasonix/.env`（`DEEPSEEK_API_KEY`、`OMNIROUTE_API_KEY`，配置在 GitHub 登录之前）和 `~/.reasonix/config.toml`（provider 配置）。容器内已关闭 Reasonix sandbox（`bash = "off"`），避免缺少 bwrap 导致 bash 命令被拦截。
+容器启动时自动配置 Reasonix 同时接入 DeepSeek 官方和 New-API，写入 `~/.reasonix/.env`（`DEEPSEEK_API_KEY`、`NEW_API_KEY`，配置在 GitHub 登录之前）和 `~/.reasonix/config.toml`（provider 配置）。容器内已关闭 Reasonix sandbox（`bash = "off"`），避免缺少 bwrap 导致 bash 命令被拦截。
 
 - providers：
-  - `deepseek` — DeepSeek 官方 API，模型 `deepseek-v4-flash` / `deepseek-v4-pro`
-  - `omniroute` — OmniRoute 网关，模型 `deepseek-v4-flash` / `deepseek-v4-pro`
+  - `deepseek` — DeepSeek 官方 API，模型 `deepseek-v4-flash`
+  - `newapi` — New-API 网关，模型 `deepseek-v4-flash` / `qwen3.8-flash`
 - 默认模型：`deepseek/deepseek-v4-flash`
 - 可选覆盖默认模型名：
   - `REASONIX_DEFAULT_MODEL` — 默认 `deepseek/deepseek-v4-flash`
-- 切换 provider：`reasonix run --model deepseek "<任务>"` 或 `reasonix run --model omniroute "<任务>"`
+- 切换 provider：`reasonix run --model deepseek "<任务>"` 或 `reasonix run --model newapi "<任务>"`
 
 使用方式：在任意项目目录运行 `reasonix` 开启交互会话，或 `reasonix run "<任务>"` 无界面执行。
 

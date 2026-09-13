@@ -2,24 +2,23 @@
 # 遇到错误立即停止运行
 set -e
 
-# 1. 配置 Reasonix（DEEPSEEK_API_KEY + OMNIROUTE_API_KEY 写入 ~/.reasonix/.env + config.toml）
+# 1. 配置 Reasonix（DEEPSEEK_API_KEY + NEW_API_KEY 写入 ~/.reasonix/.env + config.toml）
 setup_reasonix() {
-    if [ -z "${DEEPSEEK_TOKEN:-}" ] && [ -z "${OMNIROUTE_TOKEN:-}" ]; then
-        echo "WARNING: Neither DEEPSEEK_TOKEN nor OMNIROUTE_TOKEN set. Reasonix setup skipped."
+    if [ -z "${DEEPSEEK_TOKEN:-}" ] && [ -z "${NEW_API_TOKEN:-}" ]; then
+        echo "WARNING: Neither DEEPSEEK_TOKEN nor NEW_API_TOKEN set. Reasonix setup skipped."
         return
     fi
 
-    echo "Configuring Reasonix (DeepSeek official + OmniRoute)..."
+    echo "Configuring Reasonix (DeepSeek official + New-API)..."
     mkdir -p /home/ubuntu/.reasonix
 
     # 全局密钥文件 <Reasonix home>/.env，provider 通过 api_key_env 引用
     cat > /home/ubuntu/.reasonix/.env << REASONIX_ENV
 DEEPSEEK_API_KEY=${DEEPSEEK_TOKEN}
-OMNIROUTE_API_KEY=${OMNIROUTE_TOKEN}
 NEW_API_KEY=${NEW_API_TOKEN}
 REASONIX_ENV
 
-    # 用户级 config.toml（~/.reasonix/config.toml），接入 DeepSeek 官方 + OmniRoute
+    # 用户级 config.toml（~/.reasonix/config.toml），接入 DeepSeek 官方 + New-API
     cat > /home/ubuntu/.reasonix/config.toml << REASONIX_CONFIG
 config_version = 1
 default_model = "${REASONIX_DEFAULT_MODEL:-deepseek/deepseek-v4-flash}"
@@ -33,99 +32,23 @@ bash = "off"
 name        = "deepseek"
 kind        = "openai"
 base_url    = "https://api.deepseek.com"
-models      = ["deepseek-v4-flash", "deepseek-v4-pro"]
+models      = ["deepseek-v4-flash"]
 default     = "deepseek-v4-flash"
 api_key_env = "DEEPSEEK_API_KEY"
-
-[[providers]]
-name        = "omniroute"
-kind        = "openai"
-base_url    = "${OMNIROUTE_BASE_URL:-http://192.168.8.228:20128}/v1"
-models      = ["deepseek-v4-flash", "deepseek-v4-pro"]
-api_key_env = "OMNIROUTE_API_KEY"
 
 [[providers]]
 name        = "newapi"
 kind        = "openai"
 base_url    = "${NEW_API_BASE_URL:-http://192.168.8.228:3000}/v1"
-models      = ["deepseek-v4-flash", "deepseek-v4-pro", "qwen3.8-flash"]
+models      = ["deepseek-v4-flash", "qwen3.8-flash"]
 api_key_env = "NEW_API_KEY"
 REASONIX_CONFIG
 
     chmod 600 /home/ubuntu/.reasonix/.env /home/ubuntu/.reasonix/config.toml 2>/dev/null || true
-    echo "Reasonix integration ready (providers: deepseek + omniroute + newapi, default_model: ${REASONIX_DEFAULT_MODEL:-deepseek/deepseek-v4-flash})."
+    echo "Reasonix integration ready (providers: deepseek + newapi, default_model: ${REASONIX_DEFAULT_MODEL:-deepseek/deepseek-v4-flash})."
 }
 
 setup_reasonix
-
-# 1.5 配置 dsh（DeepSeek Harness）：DEEPSEEK_API_KEY + settings.yaml（在 daemon 启动前完成）
-setup_dsh() {
-    if [ -z "${DEEPSEEK_TOKEN:-}" ] && [ -z "${OMNIROUTE_TOKEN:-}" ]; then
-        echo "WARNING: Neither DEEPSEEK_TOKEN nor OMNIROUTE_TOKEN set. dsh setup skipped."
-        return
-    fi
-
-    echo "Configuring dsh (DeepSeek Harness)..."
-    export DSH_HOME="${DSH_HOME:-/home/ubuntu/.dsh}"
-    mkdir -p "${DSH_HOME}"
-
-    # Multica 运行时 profile（镜像构建时已安装；缺失时补装）
-    if [ ! -d "${DSH_HOME}/profiles/multica" ]; then
-        echo "Installing dsh multica profile..."
-        dsh plugin --profile multica add dsh-profile-multica || echo "WARNING: dsh multica profile install failed."
-    fi
-
-    # provider 凭证：dsh 通过 apiKeyEnv 从环境变量解析
-    if [ -n "${DEEPSEEK_TOKEN:-}" ]; then
-        export DEEPSEEK_API_KEY="${DEEPSEEK_TOKEN}"
-    fi
-    if [ -n "${OMNIROUTE_TOKEN:-}" ]; then
-        export OMNIROUTE_API_KEY="${OMNIROUTE_TOKEN}"
-    fi
-    if [ -n "${NEW_API_TOKEN:-}" ]; then
-        export NEW_API_KEY="${NEW_API_TOKEN}"
-    fi
-
-    # provider 配置写入 $DSH_HOME/settings.yaml（参考 dsh providers 文档：Settings → Models）
-    # 注意：所有自定义 provider 必须合并进单一 llm-pi-ai.providers 节点下，
-    # 重复的顶层键会导致 DUPLICATE_KEY 使 dsh profile 加载失败（multica 无法检测到 dsh）
-    {
-        printf 'llm-deepseek:\n'
-        printf '  apiKeyEnv: DEEPSEEK_API_KEY\n'
-        printf '  baseURL: https://api.deepseek.com\n'
-        printf '  models:\n'
-        printf '    - id: deepseek-v4-flash\n'
-        printf '    - id: deepseek-v4-pro\n'
-        if [ -n "${OMNIROUTE_TOKEN:-}" ]; then
-            printf '\nllm-pi-ai:\n  providers:\n    omniroute:\n'
-            printf '      apiKeyEnv: OMNIROUTE_API_KEY\n'
-            printf '      api: openai-completions\n'
-            printf '      baseURL: "%s/v1"\n' "${OMNIROUTE_BASE_URL:-http://192.168.8.228:20128}"
-            printf '      models:\n        - id: deepseek-v4-flash\n        - id: deepseek-v4-pro\n'
-        fi
-        if [ -n "${NEW_API_TOKEN:-}" ]; then
-            if [ -z "${OMNIROUTE_TOKEN:-}" ]; then
-                printf '\nllm-pi-ai:\n  providers:\n'
-            fi
-            printf '    new_api:\n'
-            printf '      apiKeyEnv: NEW_API_KEY\n'
-            printf '      api: openai-completions\n'
-            printf '      baseURL: "%s/v1"\n' "${NEW_API_BASE_URL:-http://192.168.8.228:3000}"
-            printf '      models:\n        - id: deepseek-v4-flash\n        - id: deepseek-v4-pro\n        - id: qwen3.8-flash\n'
-        fi
-    } > "${DSH_HOME}/settings.yaml"
-
-    chmod 600 "${DSH_HOME}/settings.yaml" 2>/dev/null || true
-
-    # 守护进程只有在 dsh --profile multica --probe 成功后才注册 DeepSeek Harness
-    if dsh --profile multica --probe >/dev/null 2>&1; then
-        echo "dsh multica profile probe OK (DeepSeek Harness registered)."
-    else
-        echo "WARNING: dsh --profile multica --probe failed."
-    fi
-}
-
-setup_dsh
 
 # 3. 写入 opencode auth.json（所有可用的 provider key）
 echo "写入 opencode auth.json"
@@ -136,14 +59,6 @@ if [ -n "$DEEPSEEK_TOKEN" ]; then
     if [ "$FIRST" = true ]; then FIRST=false; else AUTH_JSON+=", "; fi
     AUTH_JSON+="\"deepseek\": {\"type\": \"api\", \"key\": \"${DEEPSEEK_TOKEN}\"}"
 fi
-if [ -n "$OPENCODE_GO_TOKEN" ]; then
-    if [ "$FIRST" = true ]; then FIRST=false; else AUTH_JSON+=", "; fi
-    AUTH_JSON+="\"opencode-go\": {\"type\": \"api\", \"key\": \"${OPENCODE_GO_TOKEN}\"}"
-fi
-if [ -n "$OMNIROUTE_TOKEN" ]; then
-    if [ "$FIRST" = true ]; then FIRST=false; else AUTH_JSON+=", "; fi
-    AUTH_JSON+="\"omniroute\": {\"type\": \"api\", \"key\": \"${OMNIROUTE_TOKEN}\"}"
-fi
 if [ -n "$NEW_API_TOKEN" ]; then
     if [ "$FIRST" = true ]; then FIRST=false; else AUTH_JSON+=", "; fi
     AUTH_JSON+="\"newapi\": {\"type\": \"api\", \"key\": \"${NEW_API_TOKEN}\"}"
@@ -151,33 +66,14 @@ fi
 AUTH_JSON+="}"
 echo "$AUTH_JSON" > /home/ubuntu/.local/share/opencode/auth.json
 
-echo "写入 opencode.json (omniroute 自定义 provider)"
-if [ -n "$OMNIROUTE_TOKEN" ]; then
+echo "写入 opencode.json (newapi 自定义 provider)"
+if [ -n "$NEW_API_TOKEN" ]; then
     mkdir -p /home/ubuntu/.config/opencode
     cat > /home/ubuntu/.config/opencode/opencode.json <<OPENCODE_JSON
 {
   "\$schema": "https://opencode.ai/config.json",
   "model": "deepseek/deepseek-v4-flash",
   "provider": {
-    "omniroute": {
-      "npm": "@ai-sdk/openai-compatible",
-      "name": "OmniRoute",
-      "options": {
-        "baseURL": "${OMNIROUTE_BASE_URL:-http://192.168.8.228:20128}/v1",
-        "apiKey": "${OMNIROUTE_TOKEN}"
-      },
-      "models": {
-        "deepseek-v4-flash": {
-          "name": "DeepSeek V4 Flash (OmniRoute)"
-        },
-        "deepseek-v4-pro": {
-          "name": "DeepSeek V4 Pro (OmniRoute)"
-        },
-        "auto/coding": {
-          "name": "OmniRoute Auto Coding"
-        }
-      }
-    },
     "newapi": {
       "npm": "@ai-sdk/openai-compatible",
       "name": "New-API",
@@ -188,9 +84,6 @@ if [ -n "$OMNIROUTE_TOKEN" ]; then
       "models": {
         "deepseek-v4-flash": {
           "name": "DeepSeek V4 Flash (New-API)"
-        },
-        "deepseek-v4-pro": {
-          "name": "DeepSeek V4 Pro (New-API)"
         }
       }
     }
@@ -224,12 +117,12 @@ setup_cliproxyapi() {
         BRIDGE_UPSTREAM="newapi"
         BRIDGE_BASE_URL="${NEW_API_BASE_URL:-http://192.168.8.228:3000}"
         BRIDGE_TOKEN="${NEW_API_TOKEN}"
-        BRIDGE_MODELS_DEFAULT="deepseek-v4-flash,deepseek-v4-pro,qwen3.8-flash"
+        BRIDGE_MODELS_DEFAULT="deepseek-v4-flash,qwen3.8-flash"
     else
         BRIDGE_UPSTREAM="deepseek"
         BRIDGE_BASE_URL="https://api.deepseek.com"
         BRIDGE_TOKEN="${DEEPSEEK_TOKEN:-}"
-        BRIDGE_MODELS_DEFAULT="deepseek-v4-flash,deepseek-v4-pro"
+        BRIDGE_MODELS_DEFAULT="deepseek-v4-flash"
     fi
 
     if [ "${CLIPROXY_BRIDGE}" = "off" ]; then
@@ -261,27 +154,29 @@ setup_cliproxyapi() {
             2>/dev/null) || true
         # 连不上时 curl 自身输出 000
         probe_code="${probe_code:-000}"
-        case "${probe_code}" in
-            404|405|501)
-                echo "Upstream ${BRIDGE_UPSTREAM} does not serve /v1/responses (HTTP ${probe_code}); enabling CLIProxyAPI bridge." ;;
-            200)
-                echo "Upstream ${BRIDGE_UPSTREAM} already serves /v1/responses (HTTP 200); bridge not needed."
-                return ;;
-            401|403)
-                # new-api 是本次要解决的目标上游，它只提供 chat/completions；
-                # 它的鉴权在路由匹配之前，探测常被 401/403 拦下，不能因此放弃桥接。
-                # 其它上游（如 DeepSeek 官方）结论不明时保持既有直连行为。
-                if [ "${BRIDGE_UPSTREAM}" = "newapi" ]; then
-                    echo "Upstream newapi probe returned HTTP ${probe_code} (auth happens before routing); enabling CLIProxyAPI bridge anyway."
-                else
+        if [ "${BRIDGE_UPSTREAM}" = "newapi" ]; then
+            # new-api 是本次要解决的目标上游，只提供 /v1/chat/completions。
+            # 它对 POST /v1/responses 的响应不是 404：实测返回 400
+            # invalid_request_error（端点存在但拒绝 responses 负载）；鉴权还可能
+            # 先于路由返回 401/403。除了明确 200，其余（400/401/403/404/405/501/
+            # 000 暂时不可达）都说明直连 responses 不可用，统一走本地桥接；
+            # 上游暂时不可达时桥接会自行重试，不影响后续恢复。
+            if [ "${probe_code}" = "200" ]; then
+                echo "Upstream newapi already serves /v1/responses (HTTP 200); bridge not needed."
+                return
+            fi
+            echo "Upstream newapi does not serve /v1/responses (HTTP ${probe_code}); enabling CLIProxyAPI bridge."
+        else
+            # 其它上游（如 DeepSeek 官方）只在明确不支持 responses 时桥接，
+            # 结论不明（401/403/5xx/网络不通）时保持既有直连行为。
+            case "${probe_code}" in
+                404|405|501|400)
+                    echo "Upstream ${BRIDGE_UPSTREAM} does not serve /v1/responses (HTTP ${probe_code}); enabling CLIProxyAPI bridge." ;;
+                *)
                     echo "CLIProxyAPI bridge skipped: /v1/responses probe inconclusive (HTTP ${probe_code})."
-                    return
-                fi ;;
-            *)
-                # 网络不通等：不擅自改变既有行为
-                echo "CLIProxyAPI bridge skipped: /v1/responses probe inconclusive (HTTP ${probe_code})."
-                return ;;
-        esac
+                    return ;;
+            esac
+        fi
     else
         echo "CLIProxyAPI bridge forced on (CLIPROXY_BRIDGE=on) for upstream ${BRIDGE_UPSTREAM}."
     fi
