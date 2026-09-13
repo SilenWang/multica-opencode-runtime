@@ -28,8 +28,8 @@
       "comp_hash": "3000",
       "reasoning_summary_format": "experimental",
       "default_reasoning_summary": "none",
-      "display_name": "Luna - DeepSeek-V4-Flash",
-      "description": "Latest frontier agentic coding model (luna maps to flash on OmniRoute).",
+      "display_name": "DeepSeek-V4-Flash",
+      "description": "Latest frontier agentic coding model.",
       "default_reasoning_level": "high",
       "supported_reasoning_levels": [
         {
@@ -95,8 +95,8 @@
       "comp_hash": "3000",
       "reasoning_summary_format": "experimental",
       "default_reasoning_summary": "none",
-      "display_name": "Sol - DeepSeek-V4-Pro",
-      "description": "Most capable frontier agentic coding model (sol maps to pro on OmniRoute).",
+      "display_name": "DeepSeek-V4-Pro",
+      "description": "Most capable frontier agentic coding model.",
       "default_reasoning_level": "high",
       "supported_reasoning_levels": [
         {

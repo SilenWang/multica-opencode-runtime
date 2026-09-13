@@ -2,24 +2,23 @@
 # 遇到错误立即停止运行
 set -e
 
-# 1. 配置 Reasonix（DEEPSEEK_API_KEY + OMNIROUTE_API_KEY 写入 ~/.reasonix/.env + config.toml）
+# 1. 配置 Reasonix（DEEPSEEK_API_KEY + NEW_API_KEY 写入 ~/.reasonix/.env + config.toml）
 setup_reasonix() {
-    if [ -z "${DEEPSEEK_TOKEN:-}" ] && [ -z "${OMNIROUTE_TOKEN:-}" ]; then
-        echo "WARNING: Neither DEEPSEEK_TOKEN nor OMNIROUTE_TOKEN set. Reasonix setup skipped."
+    if [ -z "${DEEPSEEK_TOKEN:-}" ] && [ -z "${NEW_API_TOKEN:-}" ]; then
+        echo "WARNING: Neither DEEPSEEK_TOKEN nor NEW_API_TOKEN set. Reasonix setup skipped."
         return
     fi
 
-    echo "Configuring Reasonix (DeepSeek official + OmniRoute)..."
+    echo "Configuring Reasonix (DeepSeek official + New-API)..."
     mkdir -p /home/ubuntu/.reasonix
 
     # 全局密钥文件 <Reasonix home>/.env，provider 通过 api_key_env 引用
     cat > /home/ubuntu/.reasonix/.env << REASONIX_ENV
 DEEPSEEK_API_KEY=${DEEPSEEK_TOKEN}
-OMNIROUTE_API_KEY=${OMNIROUTE_TOKEN}
 NEW_API_KEY=${NEW_API_TOKEN}
 REASONIX_ENV
 
-    # 用户级 config.toml（~/.reasonix/config.toml），接入 DeepSeek 官方 + OmniRoute
+    # 用户级 config.toml（~/.reasonix/config.toml），接入 DeepSeek 官方 + New-API
     cat > /home/ubuntu/.reasonix/config.toml << REASONIX_CONFIG
 config_version = 1
 default_model = "${REASONIX_DEFAULT_MODEL:-deepseek/deepseek-v4-flash}"
@@ -38,13 +37,6 @@ default     = "deepseek-v4-flash"
 api_key_env = "DEEPSEEK_API_KEY"
 
 [[providers]]
-name        = "omniroute"
-kind        = "openai"
-base_url    = "${OMNIROUTE_BASE_URL:-http://192.168.8.228:20128}/v1"
-models      = ["deepseek-v4-flash", "deepseek-v4-pro"]
-api_key_env = "OMNIROUTE_API_KEY"
-
-[[providers]]
 name        = "newapi"
 kind        = "openai"
 base_url    = "${NEW_API_BASE_URL:-http://192.168.8.228:3000}/v1"
@@ -53,7 +45,7 @@ api_key_env = "NEW_API_KEY"
 REASONIX_CONFIG
 
     chmod 600 /home/ubuntu/.reasonix/.env /home/ubuntu/.reasonix/config.toml 2>/dev/null || true
-    echo "Reasonix integration ready (providers: deepseek + omniroute + newapi, default_model: ${REASONIX_DEFAULT_MODEL:-deepseek/deepseek-v4-flash})."
+    echo "Reasonix integration ready (providers: deepseek + newapi, default_model: ${REASONIX_DEFAULT_MODEL:-deepseek/deepseek-v4-flash})."
 }
 
 setup_reasonix
@@ -71,10 +63,6 @@ if [ -n "$OPENCODE_GO_TOKEN" ]; then
     if [ "$FIRST" = true ]; then FIRST=false; else AUTH_JSON+=", "; fi
     AUTH_JSON+="\"opencode-go\": {\"type\": \"api\", \"key\": \"${OPENCODE_GO_TOKEN}\"}"
 fi
-if [ -n "$OMNIROUTE_TOKEN" ]; then
-    if [ "$FIRST" = true ]; then FIRST=false; else AUTH_JSON+=", "; fi
-    AUTH_JSON+="\"omniroute\": {\"type\": \"api\", \"key\": \"${OMNIROUTE_TOKEN}\"}"
-fi
 if [ -n "$NEW_API_TOKEN" ]; then
     if [ "$FIRST" = true ]; then FIRST=false; else AUTH_JSON+=", "; fi
     AUTH_JSON+="\"newapi\": {\"type\": \"api\", \"key\": \"${NEW_API_TOKEN}\"}"
@@ -82,33 +70,14 @@ fi
 AUTH_JSON+="}"
 echo "$AUTH_JSON" > /home/ubuntu/.local/share/opencode/auth.json
 
-echo "写入 opencode.json (omniroute 自定义 provider)"
-if [ -n "$OMNIROUTE_TOKEN" ]; then
+echo "写入 opencode.json (newapi 自定义 provider)"
+if [ -n "$NEW_API_TOKEN" ]; then
     mkdir -p /home/ubuntu/.config/opencode
     cat > /home/ubuntu/.config/opencode/opencode.json <<OPENCODE_JSON
 {
   "\$schema": "https://opencode.ai/config.json",
   "model": "deepseek/deepseek-v4-flash",
   "provider": {
-    "omniroute": {
-      "npm": "@ai-sdk/openai-compatible",
-      "name": "OmniRoute",
-      "options": {
-        "baseURL": "${OMNIROUTE_BASE_URL:-http://192.168.8.228:20128}/v1",
-        "apiKey": "${OMNIROUTE_TOKEN}"
-      },
-      "models": {
-        "deepseek-v4-flash": {
-          "name": "DeepSeek V4 Flash (OmniRoute)"
-        },
-        "deepseek-v4-pro": {
-          "name": "DeepSeek V4 Pro (OmniRoute)"
-        },
-        "auto/coding": {
-          "name": "OmniRoute Auto Coding"
-        }
-      }
-    },
     "newapi": {
       "npm": "@ai-sdk/openai-compatible",
       "name": "New-API",
