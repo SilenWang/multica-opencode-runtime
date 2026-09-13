@@ -32,7 +32,7 @@ bash = "off"
 name        = "deepseek"
 kind        = "openai"
 base_url    = "https://api.deepseek.com"
-models      = ["deepseek-v4-flash", "deepseek-v4-pro"]
+models      = ["deepseek-v4-flash"]
 default     = "deepseek-v4-flash"
 api_key_env = "DEEPSEEK_API_KEY"
 
@@ -40,7 +40,7 @@ api_key_env = "DEEPSEEK_API_KEY"
 name        = "newapi"
 kind        = "openai"
 base_url    = "${NEW_API_BASE_URL:-http://192.168.8.228:3000}/v1"
-models      = ["deepseek-v4-flash", "deepseek-v4-pro", "qwen3.8-flash"]
+models      = ["deepseek-v4-flash", "qwen3.8-flash"]
 api_key_env = "NEW_API_KEY"
 REASONIX_CONFIG
 
@@ -84,9 +84,6 @@ if [ -n "$NEW_API_TOKEN" ]; then
       "models": {
         "deepseek-v4-flash": {
           "name": "DeepSeek V4 Flash (New-API)"
-        },
-        "deepseek-v4-pro": {
-          "name": "DeepSeek V4 Pro (New-API)"
         }
       }
     }
@@ -120,12 +117,12 @@ setup_cliproxyapi() {
         BRIDGE_UPSTREAM="newapi"
         BRIDGE_BASE_URL="${NEW_API_BASE_URL:-http://192.168.8.228:3000}"
         BRIDGE_TOKEN="${NEW_API_TOKEN}"
-        BRIDGE_MODELS_DEFAULT="deepseek-v4-flash,deepseek-v4-pro,qwen3.8-flash"
+        BRIDGE_MODELS_DEFAULT="deepseek-v4-flash,qwen3.8-flash"
     else
         BRIDGE_UPSTREAM="deepseek"
         BRIDGE_BASE_URL="https://api.deepseek.com"
         BRIDGE_TOKEN="${DEEPSEEK_TOKEN:-}"
-        BRIDGE_MODELS_DEFAULT="deepseek-v4-flash,deepseek-v4-pro"
+        BRIDGE_MODELS_DEFAULT="deepseek-v4-flash"
     fi
 
     if [ "${CLIPROXY_BRIDGE}" = "off" ]; then

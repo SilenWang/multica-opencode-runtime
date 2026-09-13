@@ -85,9 +85,8 @@ codex ──responses──> 127.0.0.1:8317 (CLIProxyAPI) ──chat/completions
 
 ### CodeBuddy CLI
 
-容器启动时自动生成 `~/.codebuddy/models.json`，包含两个模型：
+容器启动时自动生成 `~/.codebuddy/models.json`，包含以下模型：
 
-- `deepseek-v4-pro` — DeepSeek API
 - `deepseek-v4-flash` — DeepSeek API
 
 配置完成后直接在任意项目目录运行 `codebuddy` 即可使用。
@@ -97,8 +96,8 @@ codex ──responses──> 127.0.0.1:8317 (CLIProxyAPI) ──chat/completions
 容器启动时自动配置 Reasonix 同时接入 DeepSeek 官方和 New-API，写入 `~/.reasonix/.env`（`DEEPSEEK_API_KEY`、`NEW_API_KEY`，配置在 GitHub 登录之前）和 `~/.reasonix/config.toml`（provider 配置）。容器内已关闭 Reasonix sandbox（`bash = "off"`），避免缺少 bwrap 导致 bash 命令被拦截。
 
 - providers：
-  - `deepseek` — DeepSeek 官方 API，模型 `deepseek-v4-flash` / `deepseek-v4-pro`
-  - `newapi` — New-API 网关，模型 `deepseek-v4-flash` / `deepseek-v4-pro` / `qwen3.8-flash`
+  - `deepseek` — DeepSeek 官方 API，模型 `deepseek-v4-flash`
+  - `newapi` — New-API 网关，模型 `deepseek-v4-flash` / `qwen3.8-flash`
 - 默认模型：`deepseek/deepseek-v4-flash`
 - 可选覆盖默认模型名：
   - `REASONIX_DEFAULT_MODEL` — 默认 `deepseek/deepseek-v4-flash`
