@@ -54,6 +54,7 @@ GitHub 需要在容器启动后手动认证：使用`docker logs YOU_CONTAINER_N
 
 - 默认模型：`deepseek-v4-flash`
 - 模型目录 `models.json` 来自官方 DeepSeek 集成脚本（含 `base_instructions` 等字段，兼容 Codex CLI >= 0.144.0）
+- `deepseek-v4-flash` 已声明多模态输入（`input_modalities` 含 `image`），可直接用 `codex -i <图片>` 附加图片，经 CLIProxyAPI 桥接透传给上游
 
 配置完成后直接在任意项目目录运行 `codex` 即可使用。
 
