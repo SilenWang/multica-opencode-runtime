@@ -11,6 +11,7 @@
 - 预装 CLIProxyAPI（`cliproxyapi`，为 Codex 做 `responses` ↔ `chat/completions` 协议转换）
 - 预装 CodeBuddy CLI（`@tencent-ai/codebuddy-code`）
 - 预装 Reasonix（含 DeepSeek 官方 API 配置）
+- 预装 ponytail（lazy senior dev 规则集，容器内所有 agent 默认启用，可按会话关闭）
 - 预装 Node.js v22（`v22.23.2`）
 - 已安装 GitHub CLI (gh)
 - 支持 GPU（NVIDIA GPU + DRI）
@@ -105,6 +106,51 @@ codex ──responses──> 127.0.0.1:8317 (CLIProxyAPI) ──chat/completions
 - 切换 provider：`reasonix run --model deepseek "<任务>"` 或 `reasonix run --model newapi "<任务>"`
 
 使用方式：在任意项目目录运行 `reasonix` 开启交互会话，或 `reasonix run "<任务>"` 无界面执行。
+
+### ponytail（所有 agent 的 lazy senior dev 规则集）
+
+容器预装 [ponytail](https://github.com/DietrichGebert/ponytail)（MIT，固定 tag `v4.9.0` 克隆到 `/opt/ponytail`），理念是让 agent 像"公司里最懒的高级开发"：写最少、最简单的代码——写代码前先逐级判断（YAGNI → 复用已有代码 → 标准库 → 平台原生能力 → 已装依赖 → 一行代码 → 最后才写最小实现）。
+
+容器启动时（`scripts/entrypoint.sh` 的 `setup_ponytail`）自动为所有 agent 启用，无需手动操作：
+
+- **opencode** — 把插件路径合并进已有的全局配置 `~/.config/opencode/opencode.json`（保留 provider 配置），并提供全局规则 `~/.config/opencode/AGENTS.md`
+- **Claude Code** — 通过 `claude plugin marketplace add /opt/ponytail` + `claude plugin install ponytail@ponytail` 安装并启用；另有全局 memory `~/.claude/CLAUDE.md` 兜底（未安装 `claude` 时跳过）
+- **Codex** — 通过 `codex plugin marketplace add /opt/ponytail` + `codex plugin add ponytail@ponytail` 安装并默认启用；另有全局规则 `~/.codex/AGENTS.md` 兜底（插件 hooks 默认需在 `/hooks` 里手动信任，全局文件保证规则常驻）
+- **multica daemon 派生的 agent 及所有进程** — 通过环境变量 `PONYTAIL_DEFAULT_MODE`（Dockerfile `ENV` 默认 `full`）全局生效；插件命令会注入到 Agent 工具派生的 subagent
+
+Claude Code / Codex 的插件 marketplace 直接指向镜像内的 `/opt/ponytail`（固定 tag 的本地 checkout），安装完全离线、版本确定，不依赖启动时网络；相关 CLI 命令均幂等，失败只告警不阻塞（下次启动自动重试）。全局规则文件采用"缺失才写入"，不会覆盖 agent 或用户的本地修改。
+
+#### 在 Codex 中按会话开启 / 关闭
+
+Codex 的 ponytail 由插件（hooks + skills）加一份全局 `~/.codex/AGENTS.md` 共同提供，所以"完全关闭"需要同时避开这两者。`setup_ponytail` 为此准备了一个独立 home 和便捷命令，默认会话与关闭会话可以同时运行：
+
+```bash
+codex          # 默认：加载 ponytail（级别由 PONYTAIL_DEFAULT_MODE / config.json 决定）
+codex-plain    # 完全不加载 ponytail：独立 CODEX_HOME，无插件、无全局规则
+```
+
+`codex-plain` 等价于：
+
+```bash
+CODEX_HOME=~/.codex-plain PONYTAIL_DEFAULT_MODE=off codex -p ponytail-off
+```
+
+其中 `~/.codex-plain` 只 symlink 了 `~/.codex` 的 provider/models 配置，没有 ponytail 插件、也没有 `AGENTS.md`；`-p ponytail-off` 使用 `~/.codex/ponytail-off.config.toml`（`[plugins."ponytail@ponytail"] enabled = false`）确保插件被禁用。只禁用插件（保留全局规则）也可以用：
+
+```bash
+codex -p ponytail-off              # 关掉插件 hooks/skills，但全局 AGENTS.md 规则仍在
+PONYTAIL_DEFAULT_MODE=off codex    # 本会话不注入规则，但 ponytail skills 仍可见
+```
+
+> 注：若想在某项目内以"指令式"方式使用 ponytail（不装插件），把 `/opt/ponytail/AGENTS.md` 复制到项目根即可。
+
+#### 级别与命令
+
+调整默认级别：在 `.env` 中设置 `PONYTAIL_DEFAULT_MODE`（`lite` / `full` / `ultra` / `off`），或会话内用 `/ponytail <level>` 切换（持久化用 `/ponytail default <level>`）。
+
+常用命令（Claude Code / Codex / opencode 内）：`/ponytail [lite|full|ultra|off]`、`/ponytail-review`、`/ponytail-audit`、`/ponytail-debt`、`/ponytail-gain`、`/ponytail-help`。
+
+> 注：multica 的 workspace 内由平台注入自己的 `AGENTS.md`，容器不会改动它；opencode/Claude 的全局规则文件是额外的兜底层。
 
 ## 数据持久化
 
