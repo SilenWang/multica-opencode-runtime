@@ -154,27 +154,29 @@ setup_cliproxyapi() {
             2>/dev/null) || true
         # 连不上时 curl 自身输出 000
         probe_code="${probe_code:-000}"
-        case "${probe_code}" in
-            404|405|501)
-                echo "Upstream ${BRIDGE_UPSTREAM} does not serve /v1/responses (HTTP ${probe_code}); enabling CLIProxyAPI bridge." ;;
-            200)
-                echo "Upstream ${BRIDGE_UPSTREAM} already serves /v1/responses (HTTP 200); bridge not needed."
-                return ;;
-            401|403)
-                # new-api 是本次要解决的目标上游，它只提供 chat/completions；
-                # 它的鉴权在路由匹配之前，探测常被 401/403 拦下，不能因此放弃桥接。
-                # 其它上游（如 DeepSeek 官方）结论不明时保持既有直连行为。
-                if [ "${BRIDGE_UPSTREAM}" = "newapi" ]; then
-                    echo "Upstream newapi probe returned HTTP ${probe_code} (auth happens before routing); enabling CLIProxyAPI bridge anyway."
-                else
+        if [ "${BRIDGE_UPSTREAM}" = "newapi" ]; then
+            # new-api 是本次要解决的目标上游，只提供 /v1/chat/completions。
+            # 它对 POST /v1/responses 的响应不是 404：实测返回 400
+            # invalid_request_error（端点存在但拒绝 responses 负载）；鉴权还可能
+            # 先于路由返回 401/403。除了明确 200，其余（400/401/403/404/405/501/
+            # 000 暂时不可达）都说明直连 responses 不可用，统一走本地桥接；
+            # 上游暂时不可达时桥接会自行重试，不影响后续恢复。
+            if [ "${probe_code}" = "200" ]; then
+                echo "Upstream newapi already serves /v1/responses (HTTP 200); bridge not needed."
+                return
+            fi
+            echo "Upstream newapi does not serve /v1/responses (HTTP ${probe_code}); enabling CLIProxyAPI bridge."
+        else
+            # 其它上游（如 DeepSeek 官方）只在明确不支持 responses 时桥接，
+            # 结论不明（401/403/5xx/网络不通）时保持既有直连行为。
+            case "${probe_code}" in
+                404|405|501|400)
+                    echo "Upstream ${BRIDGE_UPSTREAM} does not serve /v1/responses (HTTP ${probe_code}); enabling CLIProxyAPI bridge." ;;
+                *)
                     echo "CLIProxyAPI bridge skipped: /v1/responses probe inconclusive (HTTP ${probe_code})."
-                    return
-                fi ;;
-            *)
-                # 网络不通等：不擅自改变既有行为
-                echo "CLIProxyAPI bridge skipped: /v1/responses probe inconclusive (HTTP ${probe_code})."
-                return ;;
-        esac
+                    return ;;
+            esac
+        fi
     else
         echo "CLIProxyAPI bridge forced on (CLIPROXY_BRIDGE=on) for upstream ${BRIDGE_UPSTREAM}."
     fi
