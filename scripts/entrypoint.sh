@@ -102,8 +102,9 @@ fi
 # 与 https://help.router-for.me/configuration/provider/openai-compatibility.html
 #
 # 开关 CLIPROXY_BRIDGE：
-#   auto（默认）—— 探测上游 /v1/responses：404/405/501 明确不支持时启用；上游为
-#           上游为 newapi 时 401/403 也启用（其鉴权早于路由匹配）；探测不通时保持直连
+#   auto（默认）—— 上游为 newapi 时始终启用桥接（其 responses 流式支持不完整，
+#           非流式探测可能返回 200 但 Codex 流式请求会中途断开）；其它上游探测
+#           POST /v1/responses，返回 404/405/501/400 明确不支持时启用，其余保持直连
 #   on  —— 无条件启用
 #   off —— 禁用，保持直连
 setup_cliproxyapi() {
@@ -138,8 +139,22 @@ setup_cliproxyapi() {
         return
     fi
 
-    # 探测上游是否已经支持 responses 协议；只有明确不支持时才插进桥接
-    if [ "${CLIPROXY_BRIDGE}" != "on" ]; then
+    # 是否插入桥接：
+    #   CLIPROXY_BRIDGE=on  —— 无条件启用
+    #   CLIPROXY_BRIDGE=off —— 已在上面返回（禁用，保持直连）
+    #   auto（默认）—— 按上游类型决定
+    #
+    # new-api 是桥接要解决的目标上游：它的 responses 支持不完整，非流式探测可能返回
+    # 200，但 Codex 实际用流式请求，会在流中途断开（实测报
+    # "stream closed before response.completed"）。因此对 newapi 一律走本地桥接，
+    # 不做 200 跳过判断，避免探测误判导致桥接不启动、Codex 直连失败。
+    if [ "${CLIPROXY_BRIDGE}" = "on" ]; then
+        echo "CLIProxyAPI bridge forced on (CLIPROXY_BRIDGE=on) for upstream ${BRIDGE_UPSTREAM}."
+    elif [ "${BRIDGE_UPSTREAM}" = "newapi" ]; then
+        echo "Upstream newapi uses CLIProxyAPI bridge (its responses streaming is incomplete)."
+    else
+        # 其它上游（如 DeepSeek 官方）只在明确不支持 responses 时桥接，
+        # 结论不明（401/403/5xx/网络不通）时保持既有直连行为。
         local probe_base="${BRIDGE_BASE_URL%/}"
         case "${probe_base}" in
             */v1) : ;;
@@ -154,31 +169,13 @@ setup_cliproxyapi() {
             2>/dev/null) || true
         # 连不上时 curl 自身输出 000
         probe_code="${probe_code:-000}"
-        if [ "${BRIDGE_UPSTREAM}" = "newapi" ]; then
-            # new-api 是本次要解决的目标上游，只提供 /v1/chat/completions。
-            # 它对 POST /v1/responses 的响应不是 404：实测返回 400
-            # invalid_request_error（端点存在但拒绝 responses 负载）；鉴权还可能
-            # 先于路由返回 401/403。除了明确 200，其余（400/401/403/404/405/501/
-            # 000 暂时不可达）都说明直连 responses 不可用，统一走本地桥接；
-            # 上游暂时不可达时桥接会自行重试，不影响后续恢复。
-            if [ "${probe_code}" = "200" ]; then
-                echo "Upstream newapi already serves /v1/responses (HTTP 200); bridge not needed."
-                return
-            fi
-            echo "Upstream newapi does not serve /v1/responses (HTTP ${probe_code}); enabling CLIProxyAPI bridge."
-        else
-            # 其它上游（如 DeepSeek 官方）只在明确不支持 responses 时桥接，
-            # 结论不明（401/403/5xx/网络不通）时保持既有直连行为。
-            case "${probe_code}" in
-                404|405|501|400)
-                    echo "Upstream ${BRIDGE_UPSTREAM} does not serve /v1/responses (HTTP ${probe_code}); enabling CLIProxyAPI bridge." ;;
-                *)
-                    echo "CLIProxyAPI bridge skipped: /v1/responses probe inconclusive (HTTP ${probe_code})."
-                    return ;;
-            esac
-        fi
-    else
-        echo "CLIProxyAPI bridge forced on (CLIPROXY_BRIDGE=on) for upstream ${BRIDGE_UPSTREAM}."
+        case "${probe_code}" in
+            404|405|501|400)
+                echo "Upstream ${BRIDGE_UPSTREAM} does not serve /v1/responses (HTTP ${probe_code}); enabling CLIProxyAPI bridge." ;;
+            *)
+                echo "CLIProxyAPI bridge skipped: /v1/responses probe inconclusive (HTTP ${probe_code})."
+                return ;;
+        esac
     fi
 
     mkdir -p "${CLIPROXY_HOME}/auth" "${CLIPROXY_HOME}/logs"
@@ -325,6 +322,51 @@ CODEX_CONFIG_TOML
     chmod 600 /home/ubuntu/.codex/config.toml 2>/dev/null || true
 }
 setup_codex_official
+
+# 8. 配置 ponytail（lazy senior dev 规则集），仅 Codex 使用，默认不开启
+# 依赖 /opt/ponytail（Dockerfile 中按固定 tag 克隆）。只给 Codex 装插件，不写
+# 任何全局规则文件；默认级别 off，需要时由用户通过命令行开启（见 README）。
+# 需在 codex config.toml 写入之后执行，避免被覆盖。任何失败仅告警，下次启动重试。
+setup_ponytail() {
+    local ponytail_dir="/opt/ponytail"
+    if [ ! -d "${ponytail_dir}" ]; then
+        echo "WARNING: ${ponytail_dir} not found. ponytail setup skipped."
+        return
+    fi
+
+    # 默认级别 off：插件装好但不激活。只在文件缺失时写入，保留用户改动。
+    # 不设全局 PONYTAIL_DEFAULT_MODE，让命令行前缀（PONYTAIL_DEFAULT_MODE=full
+    # codex）和会话内 `/ponytail <level>` 都能正常覆盖。
+    mkdir -p /home/ubuntu/.config/ponytail
+    if [ ! -f /home/ubuntu/.config/ponytail/config.json ]; then
+        printf '{\n  "defaultMode": "off"\n}\n' \
+            > /home/ubuntu/.config/ponytail/config.json
+    fi
+
+    # 仅 Codex：本地路径 marketplace（指向镜像内固定 tag 的 checkout，离线、版本确定）。
+    # 装好后默认 off；开启方式见 README（PONYTAIL_DEFAULT_MODE=full codex）。
+    if command -v codex >/dev/null 2>&1; then
+        # codex 要求 CODEX_HOME 已存在；无 token 时 setup_codex_official 会提前返回
+        mkdir -p /home/ubuntu/.codex
+        if codex plugin marketplace add "${ponytail_dir}" >/dev/null 2>&1 \
+            && codex plugin add ponytail@ponytail >/dev/null 2>&1; then
+            echo "Codex: ponytail plugin installed (default: off)."
+            # 非交互式信任插件的 lifecycle hooks：Codex 默认要求交互式 `/hooks`
+            # 确认，容器里做不到。改为查询本地 app-server 的 `hooks/list`，把每个
+            # hook 的 trusted_hash 写进 config.toml 的 [hooks.state]，等价于在
+            # `/hooks` 里选 "Trust all and continue"。失败仅告警，用户仍可手动确认。
+            if ! node /codex-trust-plugin-hooks.mjs "ponytail@" "/home/ubuntu"; then
+                echo "WARNING: non-interactive ponytail hook trust failed; run /hooks in codex once if needed."
+            fi
+        else
+            echo "WARNING: Codex ponytail plugin install failed; retry on next start."
+        fi
+    else
+        echo "WARNING: codex not found; ponytail plugin not installed."
+    fi
+}
+
+setup_ponytail
 
 # 2. Multica 登录
 echo "准备设置Multica"

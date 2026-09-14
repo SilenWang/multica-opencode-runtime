@@ -24,6 +24,12 @@ RUN npm config set registry https://registry.npmmirror.com && \
         reasonix \
     && npm cache clean --force
 
+# 预装 ponytail（lazy senior dev 规则集，MIT），仅由 Codex 使用且默认不开启
+# 固定 tag 保证可复现（保留 .git，codex 可用本地路径 marketplace 离线安装插件）
+ARG PONYTAIL_VERSION=v4.9.0
+RUN git clone --depth 1 --branch ${PONYTAIL_VERSION} \
+        https://github.com/DietrichGebert/ponytail.git /opt/ponytail
+
 # CLIProxyAPI：协议转换网关，把 Codex 的 OpenAI `responses` 协议翻译成上游
 # （new-api 等）只支持的 `chat/completions`。上游不支持 responses 时由
 # entrypoint 在容器内拉起（见 scripts/entrypoint.sh 的 setup_cliproxyapi）。
@@ -72,7 +78,11 @@ RUN pixi global install -c https://prefix.dev/sylens opencode multica \
 
 COPY scripts/entrypoint.sh /entrypoint.sh
 COPY scripts/codex-models.json /codex-models.json
+COPY scripts/codex-trust-plugin-hooks.mjs /codex-trust-plugin-hooks.mjs
 
+# 只保留 PATH；ponytail 默认级别由 entrypoint 写入 ~/.config/ponytail/config.json
+# （defaultMode=off）。不设全局 PONYTAIL_DEFAULT_MODE，避免覆盖用户在命令行/会话内
+# 选择的级别（命令行前缀与 `/ponytail <level>` 优先级更高）。
 ENV PATH="/home/ubuntu/.local/bin:/home/ubuntu/.pixi/bin:${PATH}"
 
 ENTRYPOINT ["/bin/bash", "/entrypoint.sh"]
