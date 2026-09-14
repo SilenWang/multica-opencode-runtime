@@ -51,7 +51,7 @@ GitHub 需要在容器启动后手动认证：使用`docker logs YOU_CONTAINER_N
 
 容器启动时优先使用 `NEW_API_TOKEN` 配置 Codex 接入 New-API 网关（`~/.codex/config.toml` + `~/.codex/models.json`，`wire_api = "responses"`），未设置时回退为官方 DeepSeek 集成直连 DeepSeek 官方 API（`wire_api = "responses"`）。
 
-若所选上游不支持 `responses` 协议（典型如 new-api 网关只提供 `/v1/chat/completions`），容器会自动改走内置的 CLIProxyAPI 桥接，见下节。
+Codex 只会说 `responses` 协议，而 new-api 网关的 `responses` 支持不完整（尤其流式请求），因此上游为 new-api 时容器始终改走内置的 CLIProxyAPI 桥接，见下节。
 
 - 默认模型：`deepseek-v4-flash`
 - 模型目录 `models.json` 来自官方 DeepSeek 集成脚本（含 `base_instructions` 等字段，兼容 Codex CLI >= 0.144.0）
@@ -59,9 +59,9 @@ GitHub 需要在容器启动后手动认证：使用`docker logs YOU_CONTAINER_N
 
 配置完成后直接在任意项目目录运行 `codex` 即可使用。
 
-### CLIProxyAPI 桥接（上游不支持 responses 协议时）
+### CLIProxyAPI 桥接（Codex responses → 上游 chat/completions）
 
-Codex CLI 只会说 OpenAI 的 `responses` 协议，而 new-api 这类网关只提供 `/v1/chat/completions`（`POST /v1/responses` 返回 404），直连必然失败。镜像内置 [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI) 做协议转换：
+Codex CLI 只会说 OpenAI 的 `responses` 协议，而 new-api 网关的 `responses` 支持不完整——非流式探测可能返回 200，但 Codex 实际使用的流式请求会中途断开（`stream closed before response.completed`）。镜像内置 [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI) 做协议转换：
 
 ```
 codex ──responses──> 127.0.0.1:8317 (CLIProxyAPI) ──chat/completions──> new-api
@@ -69,7 +69,7 @@ codex ──responses──> 127.0.0.1:8317 (CLIProxyAPI) ──chat/completions
 
 容器启动时 `setup_cliproxyapi` 会：
 
-1. 探测上游 `POST /v1/responses`：404/405/501 明确不支持时启用桥接；上游为 new-api 时 401/403 也启用（其鉴权早于路由匹配）；返回 200 或探测不通时保持原有直连，不改变既有行为；
+1. 决定是否插入桥接：上游为 new-api 时始终启用（不做 200 跳过判断，避免非流式探测误判）；其它上游探测 `POST /v1/responses`，404/405/501/400 明确不支持时启用，其余保持直连；
 2. 生成 `~/.cli-proxy-api/config.yaml`（只绑 `127.0.0.1`，上游配在 `openai-compatibility` 下），拉起 `cliproxyapi` 并等 `/v1/models` 就绪（30s 超时，失败则回退直连）；
 3. 把 `~/.codex/config.toml` 的 `base_url` 指到 `http://127.0.0.1:8317/v1`，`experimental_bearer_token` 换成桥接自身的 key。
 
@@ -77,7 +77,7 @@ codex ──responses──> 127.0.0.1:8317 (CLIProxyAPI) ──chat/completions
 
 | 变量 | 默认 | 说明 |
 | --- | --- | --- |
-| `CLIPROXY_BRIDGE` | `auto` | `auto` 探测后启用 / `on` 强制启用 / `off` 禁用 |
+| `CLIPROXY_BRIDGE` | `auto` | `auto` 按上游类型启用（new-api 始终启用，其它上游探测后决定）/ `on` 强制启用 / `off` 禁用 |
 | `CLIPROXY_PORT` | `8317` | 桥接监听端口（仅 127.0.0.1） |
 | `CLIPROXY_HOME` | `/home/ubuntu/.cli-proxy-api` | 配置、auth 目录、日志、pid 所在位置 |
 | `CLIPROXY_API_KEY` | 自动生成 | 桥接访问 key，自动生成后持久化在 `$CLIPROXY_HOME/api_key` |

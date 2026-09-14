@@ -102,8 +102,9 @@ fi
 # 与 https://help.router-for.me/configuration/provider/openai-compatibility.html
 #
 # 开关 CLIPROXY_BRIDGE：
-#   auto（默认）—— 探测上游 /v1/responses：404/405/501 明确不支持时启用；上游为
-#           上游为 newapi 时 401/403 也启用（其鉴权早于路由匹配）；探测不通时保持直连
+#   auto（默认）—— 上游为 newapi 时始终启用桥接（其 responses 流式支持不完整，
+#           非流式探测可能返回 200 但 Codex 流式请求会中途断开）；其它上游探测
+#           POST /v1/responses，返回 404/405/501/400 明确不支持时启用，其余保持直连
 #   on  —— 无条件启用
 #   off —— 禁用，保持直连
 setup_cliproxyapi() {
@@ -138,8 +139,22 @@ setup_cliproxyapi() {
         return
     fi
 
-    # 探测上游是否已经支持 responses 协议；只有明确不支持时才插进桥接
-    if [ "${CLIPROXY_BRIDGE}" != "on" ]; then
+    # 是否插入桥接：
+    #   CLIPROXY_BRIDGE=on  —— 无条件启用
+    #   CLIPROXY_BRIDGE=off —— 已在上面返回（禁用，保持直连）
+    #   auto（默认）—— 按上游类型决定
+    #
+    # new-api 是桥接要解决的目标上游：它的 responses 支持不完整，非流式探测可能返回
+    # 200，但 Codex 实际用流式请求，会在流中途断开（实测报
+    # "stream closed before response.completed"）。因此对 newapi 一律走本地桥接，
+    # 不做 200 跳过判断，避免探测误判导致桥接不启动、Codex 直连失败。
+    if [ "${CLIPROXY_BRIDGE}" = "on" ]; then
+        echo "CLIProxyAPI bridge forced on (CLIPROXY_BRIDGE=on) for upstream ${BRIDGE_UPSTREAM}."
+    elif [ "${BRIDGE_UPSTREAM}" = "newapi" ]; then
+        echo "Upstream newapi uses CLIProxyAPI bridge (its responses streaming is incomplete)."
+    else
+        # 其它上游（如 DeepSeek 官方）只在明确不支持 responses 时桥接，
+        # 结论不明（401/403/5xx/网络不通）时保持既有直连行为。
         local probe_base="${BRIDGE_BASE_URL%/}"
         case "${probe_base}" in
             */v1) : ;;
@@ -154,31 +169,13 @@ setup_cliproxyapi() {
             2>/dev/null) || true
         # 连不上时 curl 自身输出 000
         probe_code="${probe_code:-000}"
-        if [ "${BRIDGE_UPSTREAM}" = "newapi" ]; then
-            # new-api 是本次要解决的目标上游，只提供 /v1/chat/completions。
-            # 它对 POST /v1/responses 的响应不是 404：实测返回 400
-            # invalid_request_error（端点存在但拒绝 responses 负载）；鉴权还可能
-            # 先于路由返回 401/403。除了明确 200，其余（400/401/403/404/405/501/
-            # 000 暂时不可达）都说明直连 responses 不可用，统一走本地桥接；
-            # 上游暂时不可达时桥接会自行重试，不影响后续恢复。
-            if [ "${probe_code}" = "200" ]; then
-                echo "Upstream newapi already serves /v1/responses (HTTP 200); bridge not needed."
-                return
-            fi
-            echo "Upstream newapi does not serve /v1/responses (HTTP ${probe_code}); enabling CLIProxyAPI bridge."
-        else
-            # 其它上游（如 DeepSeek 官方）只在明确不支持 responses 时桥接，
-            # 结论不明（401/403/5xx/网络不通）时保持既有直连行为。
-            case "${probe_code}" in
-                404|405|501|400)
-                    echo "Upstream ${BRIDGE_UPSTREAM} does not serve /v1/responses (HTTP ${probe_code}); enabling CLIProxyAPI bridge." ;;
-                *)
-                    echo "CLIProxyAPI bridge skipped: /v1/responses probe inconclusive (HTTP ${probe_code})."
-                    return ;;
-            esac
-        fi
-    else
-        echo "CLIProxyAPI bridge forced on (CLIPROXY_BRIDGE=on) for upstream ${BRIDGE_UPSTREAM}."
+        case "${probe_code}" in
+            404|405|501|400)
+                echo "Upstream ${BRIDGE_UPSTREAM} does not serve /v1/responses (HTTP ${probe_code}); enabling CLIProxyAPI bridge." ;;
+            *)
+                echo "CLIProxyAPI bridge skipped: /v1/responses probe inconclusive (HTTP ${probe_code})."
+                return ;;
+        esac
     fi
 
     mkdir -p "${CLIPROXY_HOME}/auth" "${CLIPROXY_HOME}/logs"
