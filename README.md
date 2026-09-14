@@ -125,7 +125,7 @@ codex                                # 默认：off，不注入规则
 
 `PONYTAIL_DEFAULT_MODE` 取值 `lite` / `full` / `ultra` / `off`（ponytail 官方默认是 `full`，本容器把默认改成了 `off`）。想改容器默认级别：把 `~/.config/ponytail/config.json` 的 `defaultMode` 改成目标级别，或在 `.env` 里设 `PONYTAIL_DEFAULT_MODE=full`。
 
-> Codex 的插件 hooks 需要手动信任一次：在交互式 `codex` 里打开 `/hooks`，确认并信任 ponytail 的两个 lifecycle hooks，之后 `PONYTAIL_DEFAULT_MODE=full codex` 才会每轮自动注入规则。不信任 hooks 也能用——ponytail 的 skills 仍可手动调用（`@ponytail`、`@ponytail-review` 等），ruleset 就在 skill 里。
+> Codex 的插件 hooks 默认需要交互式 `/hooks` 确认；容器里无法交互，所以 `setup_ponytail` 会在装好插件后自动完成信任：`scripts/codex-trust-plugin-hooks.mjs` 查询本地 app-server 的 `hooks/list`，把每个 ponytail hook 的 `trusted_hash` 写入 `~/.codex/config.toml` 的 `[hooks.state."<key>"]`（等价于在 `/hooks` 里选 "Trust all and continue"）。因此 `PONYTAIL_DEFAULT_MODE=full codex` 可直接每轮自动注入规则。若该步骤失败（会打印 WARNING），仍可在交互式 `codex` 里打开 `/hooks` 手动信任，或临时用 `codex --dangerously-bypass-hook-trust` 绕过；不信任 hooks 也能用——ponytail 的 skills 仍可手动调用（`@ponytail`、`@ponytail-review` 等）。
 
 会话内可用 ponytail 的 skills 切换 / 查看：`@ponytail`（ruleset）、`@ponytail-review`、`@ponytail-audit`、`@ponytail-debt`、`@ponytail-gain`、`@ponytail-help`。
 

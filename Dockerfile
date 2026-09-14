@@ -78,6 +78,7 @@ RUN pixi global install -c https://prefix.dev/sylens opencode multica \
 
 COPY scripts/entrypoint.sh /entrypoint.sh
 COPY scripts/codex-models.json /codex-models.json
+COPY scripts/codex-trust-plugin-hooks.mjs /codex-trust-plugin-hooks.mjs
 
 # 只保留 PATH；ponytail 默认级别由 entrypoint 写入 ~/.config/ponytail/config.json
 # （defaultMode=off）。不设全局 PONYTAIL_DEFAULT_MODE，避免覆盖用户在命令行/会话内

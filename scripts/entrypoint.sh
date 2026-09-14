@@ -351,6 +351,13 @@ setup_ponytail() {
         if codex plugin marketplace add "${ponytail_dir}" >/dev/null 2>&1 \
             && codex plugin add ponytail@ponytail >/dev/null 2>&1; then
             echo "Codex: ponytail plugin installed (default: off)."
+            # 非交互式信任插件的 lifecycle hooks：Codex 默认要求交互式 `/hooks`
+            # 确认，容器里做不到。改为查询本地 app-server 的 `hooks/list`，把每个
+            # hook 的 trusted_hash 写进 config.toml 的 [hooks.state]，等价于在
+            # `/hooks` 里选 "Trust all and continue"。失败仅告警，用户仍可手动确认。
+            if ! node /codex-trust-plugin-hooks.mjs "ponytail@" "/home/ubuntu"; then
+                echo "WARNING: non-interactive ponytail hook trust failed; run /hooks in codex once if needed."
+            fi
         else
             echo "WARNING: Codex ponytail plugin install failed; retry on next start."
         fi
