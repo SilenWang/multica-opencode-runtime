@@ -24,8 +24,8 @@ RUN npm config set registry https://registry.npmmirror.com && \
         reasonix \
     && npm cache clean --force
 
-# 预装 ponytail（lazy senior dev 规则集，MIT），供容器内所有 agent 使用
-# 固定 tag 保证可复现（保留 .git，claude/codex 可用本地路径 marketplace 离线安装插件）
+# 预装 ponytail（lazy senior dev 规则集，MIT），仅由 Codex 使用且默认不开启
+# 固定 tag 保证可复现（保留 .git，codex 可用本地路径 marketplace 离线安装插件）
 ARG PONYTAIL_VERSION=v4.9.0
 RUN git clone --depth 1 --branch ${PONYTAIL_VERSION} \
         https://github.com/DietrichGebert/ponytail.git /opt/ponytail
@@ -79,9 +79,10 @@ RUN pixi global install -c https://prefix.dev/sylens opencode multica \
 COPY scripts/entrypoint.sh /entrypoint.sh
 COPY scripts/codex-models.json /codex-models.json
 
-# PONYTAIL_DEFAULT_MODE 让所有 agent 进程（含 multica daemon 派生的 agent）默认以 full 级别激活 ponytail
-ENV PATH="/home/ubuntu/.local/bin:/home/ubuntu/.pixi/bin:${PATH}" \
-    PONYTAIL_DEFAULT_MODE=full
+# 只保留 PATH；ponytail 默认级别由 entrypoint 写入 ~/.config/ponytail/config.json
+# （defaultMode=off）。不设全局 PONYTAIL_DEFAULT_MODE，避免覆盖用户在命令行/会话内
+# 选择的级别（命令行前缀与 `/ponytail <level>` 优先级更高）。
+ENV PATH="/home/ubuntu/.local/bin:/home/ubuntu/.pixi/bin:${PATH}"
 
 ENTRYPOINT ["/bin/bash", "/entrypoint.sh"]
 

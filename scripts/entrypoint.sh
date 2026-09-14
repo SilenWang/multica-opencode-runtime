@@ -326,9 +326,10 @@ CODEX_CONFIG_TOML
 }
 setup_codex_official
 
-# 8. 配置 ponytail（lazy senior dev 规则集），为容器内所有 agent 启用
-# 依赖 /opt/ponytail（Dockerfile 中按固定 tag 克隆）；需在 codex config.toml /
-# opencode.json 写入之后执行，避免被覆盖。任何失败仅告警，下次启动自动重试。
+# 8. 配置 ponytail（lazy senior dev 规则集），仅 Codex 使用，默认不开启
+# 依赖 /opt/ponytail（Dockerfile 中按固定 tag 克隆）。只给 Codex 装插件，不写
+# 任何全局规则文件；默认级别 off，需要时由用户通过命令行开启（见 README）。
+# 需在 codex config.toml 写入之后执行，避免被覆盖。任何失败仅告警，下次启动重试。
 setup_ponytail() {
     local ponytail_dir="/opt/ponytail"
     if [ ! -d "${ponytail_dir}" ]; then
@@ -336,110 +337,29 @@ setup_ponytail() {
         return
     fi
 
-    echo "Configuring ponytail (defaultMode: ${PONYTAIL_DEFAULT_MODE:-full})..."
-
-    # 默认激活级别：~/.config/ponytail/config.json（PONYTAIL_DEFAULT_MODE 环境变量
-    # 优先级更高；用户通过 `/ponytail default <level>` 改过的值不覆盖，仅缺失时写入）
+    # 默认级别 off：插件装好但不激活。只在文件缺失时写入，保留用户改动。
+    # 不设全局 PONYTAIL_DEFAULT_MODE，让命令行前缀（PONYTAIL_DEFAULT_MODE=full
+    # codex）和会话内 `/ponytail <level>` 都能正常覆盖。
     mkdir -p /home/ubuntu/.config/ponytail
     if [ ! -f /home/ubuntu/.config/ponytail/config.json ]; then
-        printf '{\n  "defaultMode": "%s"\n}\n' "${PONYTAIL_DEFAULT_MODE:-full}" \
+        printf '{\n  "defaultMode": "off"\n}\n' \
             > /home/ubuntu/.config/ponytail/config.json
     fi
 
-    # 全局规则文件（指令式兜底，几乎所有 agent 都会读取）：
-    #   - opencode: ~/.config/opencode/AGENTS.md
-    #   - Claude Code: ~/.claude/CLAUDE.md
-    #   - Codex: ~/.codex/AGENTS.md
-    # 缺失才复制，不覆盖用户修改。Codex 插件 hooks 默认需要用户手动 /hooks 信任才会
-    # 每轮注入，全局文件保证即使没信任 hooks 规则也常驻；需要"完全关闭"的会话走
-    # 独立的 ~/.codex-plain（见下），不读这个全局文件。
-    mkdir -p /home/ubuntu/.config/opencode /home/ubuntu/.claude /home/ubuntu/.codex
-    if [ -f "${ponytail_dir}/AGENTS.md" ]; then
-        for target in \
-            "/home/ubuntu/.config/opencode/AGENTS.md" \
-            "/home/ubuntu/.claude/CLAUDE.md" \
-            "/home/ubuntu/.codex/AGENTS.md"; do
-            if [ ! -f "${target}" ]; then
-                cp "${ponytail_dir}/AGENTS.md" "${target}" \
-                    || echo "WARNING: failed to copy ponytail rules to ${target}."
-            fi
-        done
-    else
-        echo "WARNING: ${ponytail_dir}/AGENTS.md missing."
-    fi
-
-    # opencode 全局插件：把插件路径并入已有的 ~/.config/opencode/opencode.json
-    # （main 分支已在该文件写 provider 配置，必须保留，所以做合并而不是覆盖）
-    if [ -f "${ponytail_dir}/.opencode/plugins/ponytail.mjs" ]; then
-        node -e '
-            const fs = require("fs");
-            const p = process.argv[1];
-            const pluginPath = process.argv[2];
-            let cfg = {};
-            try { cfg = JSON.parse(fs.readFileSync(p, "utf8")); } catch (e) { cfg = {}; }
-            if (!cfg || typeof cfg !== "object" || Array.isArray(cfg)) cfg = {};
-            if (!Array.isArray(cfg.plugin)) cfg.plugin = [];
-            if (!cfg.plugin.includes(pluginPath)) cfg.plugin.push(pluginPath);
-            fs.writeFileSync(p, JSON.stringify(cfg, null, 2) + "\n");
-        ' /home/ubuntu/.config/opencode/opencode.json \
-            "${ponytail_dir}/.opencode/plugins/ponytail.mjs" \
-            && echo "opencode: ponytail plugin registered." \
-            || echo "WARNING: failed to register ponytail plugin in opencode.json."
-    fi
-
-    # Claude Code 插件：本地路径 marketplace（指向镜像内固定 tag 的 checkout，离线、版本确定）
-    if command -v claude >/dev/null 2>&1; then
-        if claude plugin marketplace add "${ponytail_dir}" >/dev/null 2>&1 \
-            && claude plugin install ponytail@ponytail >/dev/null 2>&1; then
-            echo "Claude Code: ponytail plugin installed."
-        else
-            echo "WARNING: Claude Code ponytail plugin install failed; retry on next start."
-        fi
-    fi
-
-    # Codex 插件：本地路径 marketplace 安装并默认启用。另写两份关闭用的配置：
-    #   1. ~/.codex/ponytail-off.config.toml —— Codex profile，`codex -p ponytail-off`
-    #      会禁用插件（无 hooks/skills），但仍会读到全局 ~/.codex/AGENTS.md 规则。
-    #   2. ~/.codex-plain —— 独立 CODEX_HOME，只 symlink provider 配置，没有插件、
-    #      也没有全局规则文件，配合 `codex-plain` 得到完全不加载 ponytail 的会话。
-    # 默认 `codex` 与 `codex-plain` 可同时运行、互不影响。
+    # 仅 Codex：本地路径 marketplace（指向镜像内固定 tag 的 checkout，离线、版本确定）。
+    # 装好后默认 off；开启方式见 README（PONYTAIL_DEFAULT_MODE=full codex）。
     if command -v codex >/dev/null 2>&1; then
+        # codex 要求 CODEX_HOME 已存在；无 token 时 setup_codex_official 会提前返回
         mkdir -p /home/ubuntu/.codex
         if codex plugin marketplace add "${ponytail_dir}" >/dev/null 2>&1 \
             && codex plugin add ponytail@ponytail >/dev/null 2>&1; then
-            echo "Codex: ponytail plugin installed (use 'codex-plain' for a session without ponytail)."
+            echo "Codex: ponytail plugin installed (default: off)."
         else
             echo "WARNING: Codex ponytail plugin install failed; retry on next start."
         fi
-        if [ ! -f /home/ubuntu/.codex/ponytail-off.config.toml ]; then
-            cat > /home/ubuntu/.codex/ponytail-off.config.toml <<'PONYTAIL_OFF_PROFILE'
-[plugins."ponytail@ponytail"]
-enabled = false
-PONYTAIL_OFF_PROFILE
-        fi
-        # 独立 home：复用 ~/.codex 的 provider/models，但无插件、无 AGENTS.md
-        mkdir -p /home/ubuntu/.codex-plain
-        ln -sf /home/ubuntu/.codex/config.toml /home/ubuntu/.codex-plain/config.toml
-        ln -sf /home/ubuntu/.codex/ponytail-off.config.toml \
-            /home/ubuntu/.codex-plain/ponytail-off.config.toml
-        if [ -f /home/ubuntu/.codex/models.json ]; then
-            ln -sf /home/ubuntu/.codex/models.json /home/ubuntu/.codex-plain/models.json
-        fi
+    else
+        echo "WARNING: codex not found; ponytail plugin not installed."
     fi
-
-    # 便捷入口：`codex-plain` == 完全不加载 ponytail 的 Codex 会话
-    if command -v codex >/dev/null 2>&1; then
-        mkdir -p /home/ubuntu/.local/bin
-        cat > /home/ubuntu/.local/bin/codex-plain <<'CODEX_PLAIN'
-#!/bin/bash
-# 完全不加载 ponytail 的 Codex 会话（独立 CODEX_HOME：无插件、无全局规则）
-exec env CODEX_HOME="${CODEX_HOME_PLAIN:-$HOME/.codex-plain}" \
-    PONYTAIL_DEFAULT_MODE=off codex -p ponytail-off "$@"
-CODEX_PLAIN
-        chmod +x /home/ubuntu/.local/bin/codex-plain
-    fi
-
-    echo "ponytail ready."
 }
 
 setup_ponytail
