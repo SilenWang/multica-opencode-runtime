@@ -213,6 +213,8 @@ codex ──responses──> 127.0.0.1:8317 (CLIProxyAPI) ──chat/completions
 2. 生成 `~/.cli-proxy-api/config.yaml`（只绑 `127.0.0.1`，上游配在 `openai-compatibility` 下），拉起 `cliproxyapi` 并等 `/v1/models` 就绪（30s 超时，失败则回退直连）；
 3. 把 `~/.codex/config.toml` 的 `base_url` 指到 `http://127.0.0.1:8317/v1`，`experimental_bearer_token` 换成桥接自身的 key。
 
+生成的 `config.yaml` 里固定写入 `disable-cooling: true`。桥接只有一条上游凭据，而 CLIProxyAPI 默认会对上游失败做凭据/模型冷却：一次瞬时失败（5xx/超时/断流）就把唯一凭据置入冷却（默认 60s，401/403 为 30m，404 为 12h），冷却期内所有请求直接返回 `503 auth_unavailable: no auth available`。单凭据场景下没有可切换的备用凭据，冷却只是把上游抖动放大成整段黑屏（表现为“用一段时间就 503”）。关闭冷却后，真实的上游错误会直接透传，由 Codex 与 `request-retry` 重试。
+
 相关环境变量（均有默认值，通常无需设置）：
 
 | 变量 | 默认 | 说明 |

@@ -218,6 +218,13 @@ logs-max-total-size-mb: 20
 usage-statistics-enabled: false
 request-retry: 2
 max-retry-interval: 10
+# 单凭据桥接必须关闭凭据冷却：桥接只有一条上游凭据（下面 api-key-entries 唯一），
+# 上游任意一次瞬时失败（5xx/超时/断流）都会让 CLIProxyAPI 把这条唯一凭据置入
+# 冷却（默认 60s，401/403 为 30m，404 为 12h），冷却期内所有请求直接返回
+# 503 auth_unavailable: no auth available —— 没有第二条凭据可切换，冷却只把
+# 上游抖动放大成整段黑屏，表现为"用一段时间就 503"。关闭后真实上游错误直接
+# 透传，交由 Codex / request-retry 重试。
+disable-cooling: true
 openai-compatibility:
   - name: "${BRIDGE_UPSTREAM}"
     disabled: false
