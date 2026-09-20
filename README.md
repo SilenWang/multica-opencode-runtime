@@ -28,7 +28,7 @@
 | multica | 0.4.43 | `pixi global`（channel `https://prefix.dev/sylens`） | Runtime 本体：自动登录并启动 daemon |
 | opencode | 1.18.30 | `pixi global`（同上 channel） | |
 | Codex CLI | 0.154.0 | `npm -g @openai/codex` | |
-| Reasonix | 1.38.7 | `npm -g reasonix` | 跟随最新；bash 沙箱依赖容器内的 bubblewrap（见下） |
+| Reasonix | 最新 | `npm -g reasonix` | 容器内默认 Full access（ACP 代理，见 [Reasonix](#reasonix) 章节） |
 | CLIProxyAPI | 7.2.146 | GitHub Release 固定版本 + SHA256 校验，装到 `/usr/local/bin/cliproxyapi` | Codex 协议转换桥接 |
 | ponytail | v4.9.0 | `git clone --depth 1 --branch v4.9.0` → `/opt/ponytail` | 仅 Codex 的插件，默认关闭 |
 | gh (GitHub CLI) | 2.45.0 | `apt` | 容器启动时交互式登录 |
