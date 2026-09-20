@@ -24,9 +24,10 @@ config_version = 1
 default_model = "${REASONIX_DEFAULT_MODEL:-deepseek/deepseek-v4-flash}"
 language = "zh"
 
-# 不再覆盖 [sandbox]：容器已提供可用的 bubblewrap（Dockerfile 安装 +
-# docker-compose 的 security_opt 放行命名空间/mount），reasonix 新版权限 preset
-# 的 workspace-write 沙箱可以正常工作，无需（也无法）用 bash = "off" 关闭。
+# 不再覆盖 [sandbox]：容器已是隔离边界，容器内 reasonix 无需再套沙箱。reasonix
+# 1.38.8 起权限 preset 接管 bash 沙箱，ACP 会话默认 workspace-write 且没有用户级
+# 默认设置；由 /opt/reasonix-acp-full-access.mjs（daemon 经 MULTICA_REASONIX_PATH
+# 选用）在会话建立时补发 tool_approval=danger-full-access，详见 Dockerfile。
 
 [[providers]]
 name        = "deepseek"

@@ -34,7 +34,6 @@
 | gh (GitHub CLI) | 2.45.0 | `apt` | 容器启动时交互式登录 |
 | docker CLI | 29.1.3 | `apt docker.io` | 配合挂载的宿主机 docker socket |
 | docker compose | 2.40.3 | `apt docker-compose-v2` | |
-| bubblewrap | 0.9.0 | `apt` | Reasonix bash 沙箱后端；需配合 compose 的 `security_opt`（见下） |
 | curl / git / sudo / xz-utils | - | `apt` | |
 
 其它环境特性：
@@ -42,7 +41,6 @@
 - 支持 GPU（NVIDIA GPU + DRI 设备）。
 - `ubuntu` 用户拥有免密 sudo，且已加入镜像内的 `docker` 组。
 - 容器内可直接调用宿主机 Docker（见 [容器内使用 Docker](#容器内使用-docker)）。
-- `docker-compose.yml` 设置了 `security_opt: [seccomp=unconfined, apparmor=unconfined]`：Reasonix 的受限权限 preset 用 bubblewrap 做 bash 沙箱，而 bwrap 需要创建命名空间并执行 mount；Docker 默认 seccomp 拦截 `unshare`/`clone(CLONE_NEW*)`、默认 AppArmor 配置拦截 `mount`，不放行这两项 bwrap 就无法工作。容器已挂载宿主机 docker socket 且 sudo 免密，放宽这两项不改变既有权限模型；如需更严格可改用自定义 seccomp/AppArmor profile。
 
 ## 构建与启动
 
@@ -170,17 +168,24 @@ reasonix run --model deepseek "..."        # 切到 DeepSeek 官方
 
 可选：`REASONIX_DEFAULT_MODEL` 覆盖默认模型（默认 `deepseek/deepseek-v4-flash`）。
 
-> **bash 沙箱**：Reasonix **1.38.8 起权限 preset（read-only / workspace-write，
-> ACP 会话默认 workspace-write）接管 bash 沙箱并强制 `enforce`**，`[sandbox] bash
-> = "off"` 不再生效——所以本容器不再关闭沙箱，而是让沙箱真正可用：
-> - `Dockerfile` 安装 `bubblewrap`；
-> - `docker-compose.yml` 加 `security_opt: [seccomp=unconfined, apparmor=unconfined]`，
->   放行 bwrap 需要的命名空间创建与 mount。
+> **bash 沙箱**：Reasonix **1.38.8 起权限 preset（read-only / workspace-write）接管
+> bash 沙箱并强制 `enforce`**，`[sandbox] bash = "off"` 不再生效；ACP 新会话的 preset
+> 被 reasonix 硬编码为 `workspace-write`，且 reasonix 没有用户级默认设置可以改它
+> （`[desktop] default_tool_approval_mode` / `[bot] tool_approval_mode` 都不作用于
+> ACP，实测无效）。唯一开关是 ACP 协议里的
+> `session/set_config_option {configId: "tool_approval", value: "danger-full-access"}`，
+> 而 multica daemon 目前不发这个请求。
 >
-> 两者缺一，受限 preset 会 fail closed，bash 报
-> `bash sandbox requested but unavailable ... Install bubblewrap`（SIL-232）。
-> 这样 Reasonix 可以继续跟随最新版本，同时保留 bash 隔离。若只想快速恢复而不重建
-> 容器，可临时降级到 `reasonix@1.38.7`（该版本仍认 `[sandbox] bash = "off"`）。
+> 本容器已是隔离边界，容器内无需再套沙箱，因此用
+> `scripts/reasonix-acp-full-access.mjs` 作为 ACP 代理：daemon 经
+> `MULTICA_REASONIX_PATH` 使用它，它在会话建立时补发 `tool_approval=danger-full-access`
+> 再放行会话响应。这样 reasonix 可继续跟随最新版本，且容器内不再因缺 bubblewrap
+> 而 fail closed（SIL-232）。
+>
+> 如果更希望保留 reasonix 自身的沙箱，则需让容器能运行 bubblewrap：安装
+> `bubblewrap` 并给 compose 加 `security_opt: [seccomp=unconfined, apparmor=unconfined]`
+> （Docker 默认 seccomp 拦 `unshare`/`clone(CLONE_NEW*)`、默认 AppArmor 拦 `mount`）。
+> 想临时恢复而不重建容器，也可降级到 `reasonix@1.38.7`（仍认 `[sandbox] bash = "off"`）。
 
 ## 插件
 

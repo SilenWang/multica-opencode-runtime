@@ -8,7 +8,6 @@ RUN apt-get update && apt-get install -y \
     xz-utils \
     docker.io \
     docker-compose-v2 \
-    bubblewrap \
     && rm -rf /var/lib/apt/lists/*
 
 RUN curl -fsSL --connect-timeout 10 --max-time 120 \
@@ -17,11 +16,12 @@ RUN curl -fsSL --connect-timeout 10 --max-time 120 \
     tar -xJf /tmp/node.tar.xz -C /usr/local --strip-components=1 && \
     rm /tmp/node.tar.xz
     
-# Reasonix 保持不锁版本、跟随最新（权限 preset 自 1.38.8 起接管 bash 沙箱，
-# 无法再用 [sandbox] bash = "off" 关闭）。容器改为提供可用的 bubblewrap 后端：
-# 见上面的 `bubblewrap` 依赖与 docker-compose.yml 的 security_opt
-# （seccomp/apparmor 放行命名空间与 mount）。缺一不可，否则受限 preset 会
-# fail closed，任何 bash 调用都拿不到 shell（SIL-232）。
+# Reasonix 保持不锁版本、跟随最新。1.38.8 起权限 preset 接管 bash 沙箱，ACP 新会话
+# 的 preset 被 reasonix 硬编码为 workspace-write（无用户级默认设置），只能由 ACP
+# 客户端用 session/set_config_option 切换，而 multica daemon 不发这个请求。
+# 容器本身已是隔离边界，容器内再套沙箱多余：用 scripts/reasonix-acp-full-access.mjs
+# 作为 ACP 代理，在会话建立时补发 tool_approval=danger-full-access；daemon 通过
+# MULTICA_REASONIX_PATH 使用该代理（见文件末尾 ENV）。
 RUN npm config set registry https://registry.npmmirror.com && \
     npm config set @tencent-ai:registry https://mirrors.tencent.com/npm/ && \
     npm install -g \
@@ -86,10 +86,19 @@ COPY scripts/entrypoint.sh /entrypoint.sh
 COPY scripts/codex-models.json /codex-models.json
 COPY scripts/codex-trust-plugin-hooks.mjs /codex-trust-plugin-hooks.mjs
 
+# Reasonix ACP 代理：把容器内 reasonix 会话的权限 preset 固定为 Full access
+# （容器已是隔离边界，容器内不再套沙箱）。daemon 通过 MULTICA_REASONIX_PATH
+# 选用该可执行文件；真实 reasonix 由代理的 REASONIX_REAL_BIN 默认值解析。
+COPY scripts/reasonix-acp-full-access.mjs /opt/reasonix-acp-full-access.mjs
+RUN chmod +x /opt/reasonix-acp-full-access.mjs
+
 # 只保留 PATH；ponytail 默认级别由 entrypoint 写入 ~/.config/ponytail/config.json
 # （defaultMode=off）。不设全局 PONYTAIL_DEFAULT_MODE，避免覆盖用户在命令行/会话内
 # 选择的级别（命令行前缀与 `/ponytail <level>` 优先级更高）。
 ENV PATH="/home/ubuntu/.local/bin:/home/ubuntu/.pixi/bin:${PATH}"
+# daemon 用该路径作为 reasonix 可执行文件（支持 MULTICA_REASONIX_PATH，见
+# server/internal/daemon/agents_probe.go）。
+ENV MULTICA_REASONIX_PATH="/opt/reasonix-acp-full-access.mjs"
 
 ENTRYPOINT ["/bin/bash", "/entrypoint.sh"]
 
