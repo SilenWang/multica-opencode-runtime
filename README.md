@@ -28,7 +28,7 @@
 | multica | 0.4.43 | `pixi global`（channel `https://prefix.dev/sylens`） | Runtime 本体：自动登录并启动 daemon |
 | opencode | 1.18.30 | `pixi global`（同上 channel） | |
 | Codex CLI | 0.154.0 | `npm -g @openai/codex` | |
-| Reasonix | 1.38.7 | `npm -g reasonix` | |
+| Reasonix | 最新 | `npm -g reasonix` | 容器内默认 Full access（ACP 代理，见 [Reasonix](#reasonix) 章节） |
 | CLIProxyAPI | 7.2.146 | GitHub Release 固定版本 + SHA256 校验，装到 `/usr/local/bin/cliproxyapi` | Codex 协议转换桥接 |
 | ponytail | v4.9.0 | `git clone --depth 1 --branch v4.9.0` → `/opt/ponytail` | 仅 Codex 的插件，默认关闭 |
 | gh (GitHub CLI) | 2.45.0 | `apt` | 容器启动时交互式登录 |
@@ -145,8 +145,6 @@ New-API 上游会经内置的 CLIProxyAPI 桥接（见下节）；DeepSeek 官�
   ```toml
   default_model = "deepseek/deepseek-v4-flash"
   language = "zh"
-  [sandbox]
-  bash = "off"                 # 容器内无需再隔离，避免缺 bwrap 拦截命令
 
   [[providers]]                # deepseek 官方
   name = "deepseek"
@@ -169,6 +167,25 @@ reasonix run --model deepseek "..."        # 切到 DeepSeek 官方
 ```
 
 可选：`REASONIX_DEFAULT_MODEL` 覆盖默认模型（默认 `deepseek/deepseek-v4-flash`）。
+
+> **bash 沙箱**：Reasonix **1.38.8 起权限 preset（read-only / workspace-write）接管
+> bash 沙箱并强制 `enforce`**，`[sandbox] bash = "off"` 不再生效；ACP 新会话的 preset
+> 被 reasonix 硬编码为 `workspace-write`，且 reasonix 没有用户级默认设置可以改它
+> （`[desktop] default_tool_approval_mode` / `[bot] tool_approval_mode` 都不作用于
+> ACP，实测无效）。唯一开关是 ACP 协议里的
+> `session/set_config_option {configId: "tool_approval", value: "danger-full-access"}`，
+> 而 multica daemon 目前不发这个请求。
+>
+> 本容器已是隔离边界，容器内无需再套沙箱，因此用
+> `scripts/reasonix-acp-full-access.mjs` 作为 ACP 代理：daemon 经
+> `MULTICA_REASONIX_PATH` 使用它，它在会话建立时补发 `tool_approval=danger-full-access`
+> 再放行会话响应。这样 reasonix 可继续跟随最新版本，且容器内不再因缺 bubblewrap
+> 而 fail closed（SIL-232）。
+>
+> 如果更希望保留 reasonix 自身的沙箱，则需让容器能运行 bubblewrap：安装
+> `bubblewrap` 并给 compose 加 `security_opt: [seccomp=unconfined, apparmor=unconfined]`
+> （Docker 默认 seccomp 拦 `unshare`/`clone(CLONE_NEW*)`、默认 AppArmor 拦 `mount`）。
+> 想临时恢复而不重建容器，也可降级到 `reasonix@1.38.7`（仍认 `[sandbox] bash = "off"`）。
 
 ## 插件
 
