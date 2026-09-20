@@ -74,6 +74,14 @@ RUN echo "ubuntu ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/ubuntu \
 RUN if ! getent group docker > /dev/null 2>&1; then groupadd -r docker; fi \
     && usermod -aG docker ubuntu
 
+# Reasonix ACP 代理：把容器内 reasonix 会话的权限 preset 固定为 Full access
+# （容器已是隔离边界，容器内不再套沙箱）。daemon 通过 MULTICA_REASONIX_PATH
+# 选用该可执行文件；真实 reasonix 由代理的 REASONIX_REAL_BIN 默认值解析。
+# 必须在 USER ubuntu 之前安装并加可执行位：COPY 产物默认 root 所有，
+# 切到 ubuntu 后再 chmod 会 EPERM。
+COPY scripts/reasonix-acp-full-access.mjs /opt/reasonix-acp-full-access.mjs
+RUN chmod 0755 /opt/reasonix-acp-full-access.mjs
+
 # 使用ubuntu，因为1000已经被使用 
 USER ubuntu
 WORKDIR /home/ubuntu
@@ -85,12 +93,6 @@ RUN pixi global install -c https://prefix.dev/sylens opencode multica \
 COPY scripts/entrypoint.sh /entrypoint.sh
 COPY scripts/codex-models.json /codex-models.json
 COPY scripts/codex-trust-plugin-hooks.mjs /codex-trust-plugin-hooks.mjs
-
-# Reasonix ACP 代理：把容器内 reasonix 会话的权限 preset 固定为 Full access
-# （容器已是隔离边界，容器内不再套沙箱）。daemon 通过 MULTICA_REASONIX_PATH
-# 选用该可执行文件；真实 reasonix 由代理的 REASONIX_REAL_BIN 默认值解析。
-COPY scripts/reasonix-acp-full-access.mjs /opt/reasonix-acp-full-access.mjs
-RUN chmod +x /opt/reasonix-acp-full-access.mjs
 
 # 只保留 PATH；ponytail 默认级别由 entrypoint 写入 ~/.config/ponytail/config.json
 # （defaultMode=off）。不设全局 PONYTAIL_DEFAULT_MODE，避免覆盖用户在命令行/会话内
