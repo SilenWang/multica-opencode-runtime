@@ -7,6 +7,14 @@ services:
       dockerfile: Dockerfile
     container_name: ${CONTAINER_NAME}
     hostname: ${CONTAINER_NAME}
+    # Reasonix 的受限权限 preset 用 bubblewrap 做 bash 沙箱。bwrap 需要创建
+    # user/mount/pid 命名空间并执行 mount，而 Docker 默认的 seccomp 拦截
+    # unshare/clone(CLONE_NEW*)、默认的 AppArmor 配置拦截 mount，二者都会让
+    # bwrap 失败，进而让 reasonix 对每个 bash 调用 fail closed。放行这两项后
+    # bwrap 可用（非 root 用户即可），reasonix 新版本无需再关闭沙箱。
+    security_opt:
+      - seccomp=unconfined
+      - apparmor=unconfined
     env_file:
       - .env
     group_add:

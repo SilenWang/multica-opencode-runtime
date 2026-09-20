@@ -28,12 +28,13 @@
 | multica | 0.4.43 | `pixi global`（channel `https://prefix.dev/sylens`） | Runtime 本体：自动登录并启动 daemon |
 | opencode | 1.18.30 | `pixi global`（同上 channel） | |
 | Codex CLI | 0.154.0 | `npm -g @openai/codex` | |
-| Reasonix | 1.38.7 | `npm -g reasonix@1.38.7` | 固定版本：>=1.38.8 权限 preset 强制 bash 沙箱，缺 bwrap 时 fail closed |
+| Reasonix | 1.38.7 | `npm -g reasonix` | 跟随最新；bash 沙箱依赖容器内的 bubblewrap（见下） |
 | CLIProxyAPI | 7.2.146 | GitHub Release 固定版本 + SHA256 校验，装到 `/usr/local/bin/cliproxyapi` | Codex 协议转换桥接 |
 | ponytail | v4.9.0 | `git clone --depth 1 --branch v4.9.0` → `/opt/ponytail` | 仅 Codex 的插件，默认关闭 |
 | gh (GitHub CLI) | 2.45.0 | `apt` | 容器启动时交互式登录 |
 | docker CLI | 29.1.3 | `apt docker.io` | 配合挂载的宿主机 docker socket |
 | docker compose | 2.40.3 | `apt docker-compose-v2` | |
+| bubblewrap | 0.9.0 | `apt` | Reasonix bash 沙箱后端；需配合 compose 的 `security_opt`（见下） |
 | curl / git / sudo / xz-utils | - | `apt` | |
 
 其它环境特性：
@@ -41,6 +42,7 @@
 - 支持 GPU（NVIDIA GPU + DRI 设备）。
 - `ubuntu` 用户拥有免密 sudo，且已加入镜像内的 `docker` 组。
 - 容器内可直接调用宿主机 Docker（见 [容器内使用 Docker](#容器内使用-docker)）。
+- `docker-compose.yml` 设置了 `security_opt: [seccomp=unconfined, apparmor=unconfined]`：Reasonix 的受限权限 preset 用 bubblewrap 做 bash 沙箱，而 bwrap 需要创建命名空间并执行 mount；Docker 默认 seccomp 拦截 `unshare`/`clone(CLONE_NEW*)`、默认 AppArmor 配置拦截 `mount`，不放行这两项 bwrap 就无法工作。容器已挂载宿主机 docker socket 且 sudo 免密，放宽这两项不改变既有权限模型；如需更严格可改用自定义 seccomp/AppArmor profile。
 
 ## 构建与启动
 
@@ -145,8 +147,6 @@ New-API 上游会经内置的 CLIProxyAPI 桥接（见下节）；DeepSeek 官�
   ```toml
   default_model = "deepseek/deepseek-v4-flash"
   language = "zh"
-  [sandbox]
-  bash = "off"                 # 容器内无需再隔离；本容器 seccomp 拦截命名空间，bwrap 不可用
 
   [[providers]]                # deepseek 官方
   name = "deepseek"
@@ -170,13 +170,17 @@ reasonix run --model deepseek "..."        # 切到 DeepSeek 官方
 
 可选：`REASONIX_DEFAULT_MODEL` 覆盖默认模型（默认 `deepseek/deepseek-v4-flash`）。
 
-> **版本约束**：Reasonix 必须锁定在 **1.38.7**。1.38.8 起权限 preset
-> （read-only / workspace-write，ACP 会话默认 workspace-write）接管 bash 沙箱并强制
-> `enforce`，`[sandbox] bash = "off"` 不再生效；本容器默认 seccomp 会拦截
-> `unshare`/`clone` 的命名空间创建，bubblewrap 起不来，于是 bash 直接
-> fail closed（报 `bash sandbox requested but unavailable ... Install bubblewrap`）。
-> 升级 reasonix 前必须同时解决容器命名空间权限（例如给 compose 加
-> `security_opt: [seccomp:unconfined]`），否则会重现 SIL-232 的阻断。
+> **bash 沙箱**：Reasonix **1.38.8 起权限 preset（read-only / workspace-write，
+> ACP 会话默认 workspace-write）接管 bash 沙箱并强制 `enforce`**，`[sandbox] bash
+> = "off"` 不再生效——所以本容器不再关闭沙箱，而是让沙箱真正可用：
+> - `Dockerfile` 安装 `bubblewrap`；
+> - `docker-compose.yml` 加 `security_opt: [seccomp=unconfined, apparmor=unconfined]`，
+>   放行 bwrap 需要的命名空间创建与 mount。
+>
+> 两者缺一，受限 preset 会 fail closed，bash 报
+> `bash sandbox requested but unavailable ... Install bubblewrap`（SIL-232）。
+> 这样 Reasonix 可以继续跟随最新版本，同时保留 bash 隔离。若只想快速恢复而不重建
+> 容器，可临时降级到 `reasonix@1.38.7`（该版本仍认 `[sandbox] bash = "off"`）。
 
 ## 插件
 

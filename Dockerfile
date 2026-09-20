@@ -8,6 +8,7 @@ RUN apt-get update && apt-get install -y \
     xz-utils \
     docker.io \
     docker-compose-v2 \
+    bubblewrap \
     && rm -rf /var/lib/apt/lists/*
 
 RUN curl -fsSL --connect-timeout 10 --max-time 120 \
@@ -16,19 +17,17 @@ RUN curl -fsSL --connect-timeout 10 --max-time 120 \
     tar -xJf /tmp/node.tar.xz -C /usr/local --strip-components=1 && \
     rm /tmp/node.tar.xz
     
-# Reasonix 固定在 1.38.7，不要改成不锁版本（或 >=1.38.8）。
-# 1.38.8 起权限 preset 接管了 bash 沙箱：read-only / workspace-write preset
-# 会强制 `--sandbox-bash enforce`，无视 [sandbox] bash = "off"，在缺少
-# 可用 bubblewrap 的容器里直接 fail closed，任何 bash 调用都拿不到 shell。
-# 本容器按 docker-compose 的默认 seccomp 运行，unshare/clone 创建命名空间被
-# 拦截，bwrap 无法工作；1.38.7 仍以 [sandbox] bash = "off" 为准（见
-# scripts/entrypoint.sh 的 setup_reasonix），这是容器内 reasonix 可用的前提。
+# Reasonix 保持不锁版本、跟随最新（权限 preset 自 1.38.8 起接管 bash 沙箱，
+# 无法再用 [sandbox] bash = "off" 关闭）。容器改为提供可用的 bubblewrap 后端：
+# 见上面的 `bubblewrap` 依赖与 docker-compose.yml 的 security_opt
+# （seccomp/apparmor 放行命名空间与 mount）。缺一不可，否则受限 preset 会
+# fail closed，任何 bash 调用都拿不到 shell（SIL-232）。
 RUN npm config set registry https://registry.npmmirror.com && \
     npm config set @tencent-ai:registry https://mirrors.tencent.com/npm/ && \
     npm install -g \
         @openai/codex \
         pnpm \
-        reasonix@1.38.7 \
+        reasonix \
     && npm cache clean --force
 
 # 预装 ponytail（lazy senior dev 规则集，MIT），仅由 Codex 使用且默认不开启
