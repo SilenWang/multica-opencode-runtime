@@ -16,12 +16,19 @@ RUN curl -fsSL --connect-timeout 10 --max-time 120 \
     tar -xJf /tmp/node.tar.xz -C /usr/local --strip-components=1 && \
     rm /tmp/node.tar.xz
     
+# Reasonix 固定在 1.38.7，不要改成不锁版本（或 >=1.38.8）。
+# 1.38.8 起权限 preset 接管了 bash 沙箱：read-only / workspace-write preset
+# 会强制 `--sandbox-bash enforce`，无视 [sandbox] bash = "off"，在缺少
+# 可用 bubblewrap 的容器里直接 fail closed，任何 bash 调用都拿不到 shell。
+# 本容器按 docker-compose 的默认 seccomp 运行，unshare/clone 创建命名空间被
+# 拦截，bwrap 无法工作；1.38.7 仍以 [sandbox] bash = "off" 为准（见
+# scripts/entrypoint.sh 的 setup_reasonix），这是容器内 reasonix 可用的前提。
 RUN npm config set registry https://registry.npmmirror.com && \
     npm config set @tencent-ai:registry https://mirrors.tencent.com/npm/ && \
     npm install -g \
         @openai/codex \
         pnpm \
-        reasonix \
+        reasonix@1.38.7 \
     && npm cache clean --force
 
 # 预装 ponytail（lazy senior dev 规则集，MIT），仅由 Codex 使用且默认不开启

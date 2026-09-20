@@ -24,7 +24,11 @@ config_version = 1
 default_model = "${REASONIX_DEFAULT_MODEL:-deepseek/deepseek-v4-flash}"
 language = "zh"
 
-# 容器内运行无需再隔离，关闭 sandbox，避免缺少 bwrap 导致 bash 命令被拦截
+# 容器内运行无需再隔离：本容器按 docker-compose 默认 seccomp 运行，
+# unshare/clone 创建命名空间被拦截，bubblewrap 无法工作，所以关闭 bash 沙箱，
+# 否则受限权限 preset 会 fail closed、任何 bash 调用都拿不到 shell。
+# 注意：只有 reasonix <= 1.38.7 会让 [sandbox] bash = "off" 生效；
+# 1.38.8 起权限 preset 接管沙箱、强制 enforce。Dockerfile 因此锁定 reasonix@1.38.7。
 [sandbox]
 bash = "off"
 

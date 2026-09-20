@@ -28,7 +28,7 @@
 | multica | 0.4.43 | `pixi global`（channel `https://prefix.dev/sylens`） | Runtime 本体：自动登录并启动 daemon |
 | opencode | 1.18.30 | `pixi global`（同上 channel） | |
 | Codex CLI | 0.154.0 | `npm -g @openai/codex` | |
-| Reasonix | 1.38.7 | `npm -g reasonix` | |
+| Reasonix | 1.38.7 | `npm -g reasonix@1.38.7` | 固定版本：>=1.38.8 权限 preset 强制 bash 沙箱，缺 bwrap 时 fail closed |
 | CLIProxyAPI | 7.2.146 | GitHub Release 固定版本 + SHA256 校验，装到 `/usr/local/bin/cliproxyapi` | Codex 协议转换桥接 |
 | ponytail | v4.9.0 | `git clone --depth 1 --branch v4.9.0` → `/opt/ponytail` | 仅 Codex 的插件，默认关闭 |
 | gh (GitHub CLI) | 2.45.0 | `apt` | 容器启动时交互式登录 |
@@ -146,7 +146,7 @@ New-API 上游会经内置的 CLIProxyAPI 桥接（见下节）；DeepSeek 官�
   default_model = "deepseek/deepseek-v4-flash"
   language = "zh"
   [sandbox]
-  bash = "off"                 # 容器内无需再隔离，避免缺 bwrap 拦截命令
+  bash = "off"                 # 容器内无需再隔离；本容器 seccomp 拦截命名空间，bwrap 不可用
 
   [[providers]]                # deepseek 官方
   name = "deepseek"
@@ -169,6 +169,14 @@ reasonix run --model deepseek "..."        # 切到 DeepSeek 官方
 ```
 
 可选：`REASONIX_DEFAULT_MODEL` 覆盖默认模型（默认 `deepseek/deepseek-v4-flash`）。
+
+> **版本约束**：Reasonix 必须锁定在 **1.38.7**。1.38.8 起权限 preset
+> （read-only / workspace-write，ACP 会话默认 workspace-write）接管 bash 沙箱并强制
+> `enforce`，`[sandbox] bash = "off"` 不再生效；本容器默认 seccomp 会拦截
+> `unshare`/`clone` 的命名空间创建，bubblewrap 起不来，于是 bash 直接
+> fail closed（报 `bash sandbox requested but unavailable ... Install bubblewrap`）。
+> 升级 reasonix 前必须同时解决容器命名空间权限（例如给 compose 加
+> `security_opt: [seccomp:unconfined]`），否则会重现 SIL-232 的阻断。
 
 ## 插件
 
