@@ -16,18 +16,19 @@ RUN curl -fsSL --connect-timeout 10 --max-time 120 \
     tar -xJf /tmp/node.tar.xz -C /usr/local --strip-components=1 && \
     rm /tmp/node.tar.xz
     
-# Reasonix 保持不锁版本、跟随最新。1.38.8 起权限 preset 接管 bash 沙箱，ACP 新会话
-# 的 preset 被 reasonix 硬编码为 workspace-write（无用户级默认设置），只能由 ACP
-# 客户端用 session/set_config_option 切换，而 multica daemon 不发这个请求。
-# 容器本身已是隔离边界，容器内再套沙箱多余：用 scripts/reasonix-acp-full-access.mjs
-# 作为 ACP 代理，在会话建立时补发 tool_approval=danger-full-access；daemon 通过
-# MULTICA_REASONIX_PATH 使用该代理（见文件末尾 ENV）。
+# Reasonix 固定在 1.38.7，不要改成不锁版本（或 >=1.38.8）。
+# 1.38.8 起权限 preset 接管了 bash 沙箱：read-only / workspace-write preset 会强制
+# `--sandbox-bash enforce`，无视 `[sandbox] bash = "off"`，在缺少可用 bubblewrap 的
+# 容器里直接 fail closed，任何 bash 调用都拿不到 shell。本容器按 docker-compose 的
+# 默认 seccomp 运行，unshare/clone 创建命名空间被拦，bwrap 无法工作；1.38.7 仍以
+# `[sandbox] bash = "off"` 为准（见 scripts/entrypoint.sh 的 setup_reasonix），这是
+# 容器内 reasonix 可用的前提。
 RUN npm config set registry https://registry.npmmirror.com && \
     npm config set @tencent-ai:registry https://mirrors.tencent.com/npm/ && \
     npm install -g \
         @openai/codex \
         pnpm \
-        reasonix \
+        reasonix@1.38.7 \
     && npm cache clean --force
 
 # 预装 ponytail（lazy senior dev 规则集，MIT），仅由 Codex 使用且默认不开启
@@ -74,14 +75,6 @@ RUN echo "ubuntu ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/ubuntu \
 RUN if ! getent group docker > /dev/null 2>&1; then groupadd -r docker; fi \
     && usermod -aG docker ubuntu
 
-# Reasonix ACP 代理：把容器内 reasonix 会话的权限 preset 固定为 Full access
-# （容器已是隔离边界，容器内不再套沙箱）。daemon 通过 MULTICA_REASONIX_PATH
-# 选用该可执行文件；真实 reasonix 由代理的 REASONIX_REAL_BIN 默认值解析。
-# 必须在 USER ubuntu 之前安装并加可执行位：COPY 产物默认 root 所有，
-# 切到 ubuntu 后再 chmod 会 EPERM。
-COPY scripts/reasonix-acp-full-access.mjs /opt/reasonix-acp-full-access.mjs
-RUN chmod 0755 /opt/reasonix-acp-full-access.mjs
-
 # 使用ubuntu，因为1000已经被使用 
 USER ubuntu
 WORKDIR /home/ubuntu
@@ -98,9 +91,6 @@ COPY scripts/codex-trust-plugin-hooks.mjs /codex-trust-plugin-hooks.mjs
 # （defaultMode=off）。不设全局 PONYTAIL_DEFAULT_MODE，避免覆盖用户在命令行/会话内
 # 选择的级别（命令行前缀与 `/ponytail <level>` 优先级更高）。
 ENV PATH="/home/ubuntu/.local/bin:/home/ubuntu/.pixi/bin:${PATH}"
-# daemon 用该路径作为 reasonix 可执行文件（支持 MULTICA_REASONIX_PATH，见
-# server/internal/daemon/agents_probe.go）。
-ENV MULTICA_REASONIX_PATH="/opt/reasonix-acp-full-access.mjs"
 
 ENTRYPOINT ["/bin/bash", "/entrypoint.sh"]
 

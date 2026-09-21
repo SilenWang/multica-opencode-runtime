@@ -24,10 +24,9 @@ config_version = 1
 default_model = "${REASONIX_DEFAULT_MODEL:-deepseek/deepseek-v4-flash}"
 language = "zh"
 
-# 不再覆盖 [sandbox]：容器已是隔离边界，容器内 reasonix 无需再套沙箱。reasonix
-# 1.38.8 起权限 preset 接管 bash 沙箱，ACP 会话默认 workspace-write 且没有用户级
-# 默认设置；由 /opt/reasonix-acp-full-access.mjs（daemon 经 MULTICA_REASONIX_PATH
-# 选用）在会话建立时补发 tool_approval=danger-full-access，详见 Dockerfile。
+# 容器内运行无需再隔离，关闭 sandbox，避免缺少 bwrap 导致 bash 命令被拦截
+[sandbox]
+bash = "off"
 
 [[providers]]
 name        = "deepseek"
