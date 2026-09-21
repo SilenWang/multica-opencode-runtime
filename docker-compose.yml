@@ -11,6 +11,15 @@ services:
       - .env
     group_add:
       - "${DOCKER_HOST_GID:-999}"
+    # Reasonix 的 bash 沙箱用 bubblewrap 创建用户/挂载命名空间。Docker 默认 seccomp
+    # 会拦 unshare/clone(CLONE_NEW*)，默认 AppArmor 会拦 mount；所以这里放开 seccomp
+    # 与 AppArmor 并给 SYS_ADMIN，让容器内的 bwrap 能正常工作（沙箱本身仍由 bwrap
+    # 提供）。若不需要 reasonix 的沙箱，可去掉这三项。
+    security_opt:
+      - seccomp=unconfined
+      - apparmor=unconfined
+    cap_add:
+      - SYS_ADMIN
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - ./data/multica_workspaces:/home/ubuntu/multica_workspaces

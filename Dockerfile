@@ -8,6 +8,7 @@ RUN apt-get update && apt-get install -y \
     xz-utils \
     docker.io \
     docker-compose-v2 \
+    bubblewrap \
     && rm -rf /var/lib/apt/lists/*
 
 RUN curl -fsSL --connect-timeout 10 --max-time 120 \
@@ -16,12 +17,10 @@ RUN curl -fsSL --connect-timeout 10 --max-time 120 \
     tar -xJf /tmp/node.tar.xz -C /usr/local --strip-components=1 && \
     rm /tmp/node.tar.xz
     
-# Reasonix 保持不锁版本、跟随最新。1.38.8 起权限 preset 接管 bash 沙箱，ACP 新会话
-# 的 preset 被 reasonix 硬编码为 workspace-write（无用户级默认设置），只能由 ACP
-# 客户端用 session/set_config_option 切换，而 multica daemon 不发这个请求。
-# 容器本身已是隔离边界，容器内再套沙箱多余：用 scripts/reasonix-acp-full-access.mjs
-# 作为 ACP 代理，在会话建立时补发 tool_approval=danger-full-access；daemon 通过
-# MULTICA_REASONIX_PATH 使用该代理（见文件末尾 ENV）。
+# Reasonix 保持不锁版本、跟随最新。1.38.8 起权限 preset 接管 bash 沙箱：ACP 新会话的
+# preset 是 workspace-write，reasonix 会用 bubblewrap 把每条 bash 关进沙箱。容器里
+# 因此必须能真正运行 bwrap（见 Dockerfile 的 bubblewrap 依赖与 docker-compose.yml 的
+# security_opt / cap_add），否则 preset 会 fail closed，任何 bash 调用都拿不到 shell。
 RUN npm config set registry https://registry.npmmirror.com && \
     npm config set @tencent-ai:registry https://mirrors.tencent.com/npm/ && \
     npm install -g \
@@ -74,14 +73,6 @@ RUN echo "ubuntu ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/ubuntu \
 RUN if ! getent group docker > /dev/null 2>&1; then groupadd -r docker; fi \
     && usermod -aG docker ubuntu
 
-# Reasonix ACP 代理：把容器内 reasonix 会话的权限 preset 固定为 Full access
-# （容器已是隔离边界，容器内不再套沙箱）。daemon 通过 MULTICA_REASONIX_PATH
-# 选用该可执行文件；真实 reasonix 由代理的 REASONIX_REAL_BIN 默认值解析。
-# 必须在 USER ubuntu 之前安装并加可执行位：COPY 产物默认 root 所有，
-# 切到 ubuntu 后再 chmod 会 EPERM。
-COPY scripts/reasonix-acp-full-access.mjs /opt/reasonix-acp-full-access.mjs
-RUN chmod 0755 /opt/reasonix-acp-full-access.mjs
-
 # 使用ubuntu，因为1000已经被使用 
 USER ubuntu
 WORKDIR /home/ubuntu
@@ -98,9 +89,6 @@ COPY scripts/codex-trust-plugin-hooks.mjs /codex-trust-plugin-hooks.mjs
 # （defaultMode=off）。不设全局 PONYTAIL_DEFAULT_MODE，避免覆盖用户在命令行/会话内
 # 选择的级别（命令行前缀与 `/ponytail <level>` 优先级更高）。
 ENV PATH="/home/ubuntu/.local/bin:/home/ubuntu/.pixi/bin:${PATH}"
-# daemon 用该路径作为 reasonix 可执行文件（支持 MULTICA_REASONIX_PATH，见
-# server/internal/daemon/agents_probe.go）。
-ENV MULTICA_REASONIX_PATH="/opt/reasonix-acp-full-access.mjs"
 
 ENTRYPOINT ["/bin/bash", "/entrypoint.sh"]
 
