@@ -180,12 +180,17 @@ reasonix run --model deepseek "..."        # 切到 DeepSeek 官方
 > `scripts/reasonix-acp-full-access.mjs` 作为 ACP 代理：daemon 经
 > `MULTICA_REASONIX_PATH` 使用它，它在会话建立时补发 `tool_approval=danger-full-access`
 > 再放行会话响应。这样 reasonix 可继续跟随最新版本，且容器内不再因缺 bubblewrap
-> 而 fail closed（SIL-232）。
+> 而 fail closed。
 >
-> 如果更希望保留 reasonix 自身的沙箱，则需让容器能运行 bubblewrap：安装
-> `bubblewrap` 并给 compose 加 `security_opt: [seccomp=unconfined, apparmor=unconfined]`
-> （Docker 默认 seccomp 拦 `unshare`/`clone(CLONE_NEW*)`、默认 AppArmor 拦 `mount`）。
-> 想临时恢复而不重建容器，也可降级到 `reasonix@1.38.7`（仍认 `[sandbox] bash = "off"`）。
+> **注意**：`resume` 的会话会被 reasonix 按默认 `workspace-write` preset 重建 executor，
+> 代理补发也改不动（跨进程 resume 实测一律失败）。所以代理把 `session/resume` /
+> `session/load` 改写成 `session/new` —— 每次运行都用新建会话，Full access 才真正生效。
+> **代价是不再续接 daemon 的历史会话**（每次运行都是新会话，靠 issue / 评论重建上下文）。
+>
+> 如果更希望保留会话续接，则需让容器能运行 bubblewrap：安装 `bubblewrap` 并给 compose
+> 加 `security_opt: [seccomp=unconfined, apparmor=unconfined]`（Docker 默认 seccomp 拦
+> `unshare`/`clone(CLONE_NEW*)`、默认 AppArmor 拦 `mount`），让 reasonix 自身的沙箱
+> 可用；也可降级到 `reasonix@1.38.7`（仍认 `[sandbox] bash = "off"`）。
 
 ## 插件
 
