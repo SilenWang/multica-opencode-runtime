@@ -11,9 +11,13 @@ RUN apt-get update && apt-get install -y \
     bubblewrap \
     && rm -rf /var/lib/apt/lists/*
 
-RUN curl -fsSL --connect-timeout 10 --max-time 120 \
+# Node 走 npmmirror 镜像（国内构建网络下 nodejs.org 常超时），失败再回退官方源。
+RUN curl -fsSL --connect-timeout 10 --max-time 300 \
+        https://registry.npmmirror.com/-/binary/node/v22.23.2/node-v22.23.2-linux-x64.tar.xz \
+        -o /tmp/node.tar.xz \
+    || curl -fsSL --connect-timeout 10 --max-time 300 \
         https://nodejs.org/dist/v22.23.2/node-v22.23.2-linux-x64.tar.xz \
-        -o /tmp/node.tar.xz && \
+        -o /tmp/node.tar.xz; \
     tar -xJf /tmp/node.tar.xz -C /usr/local --strip-components=1 && \
     rm /tmp/node.tar.xz
     
@@ -89,6 +93,44 @@ COPY scripts/codex-trust-plugin-hooks.mjs /codex-trust-plugin-hooks.mjs
 # （defaultMode=off）。不设全局 PONYTAIL_DEFAULT_MODE，避免覆盖用户在命令行/会话内
 # 选择的级别（命令行前缀与 `/ponytail <level>` 优先级更高）。
 ENV PATH="/home/ubuntu/.local/bin:/home/ubuntu/.pixi/bin:${PATH}"
+
+# ---------------------------------------------------------------------------
+# 可选：浏览器上网能力（ego-browser / ego-lite-linux + Google Chrome，headless）
+# ---------------------------------------------------------------------------
+# 说明：上游 citrolabs/ego-lite 官方只发 macOS DMG；这里用社区 Linux host
+# iagogfe/ego-lite-linux（MIT，MVP v0.2.0），它基于 stock Chromium + CDP，
+# 不改内核、不 fork 浏览器，只要求 Node ≥22 与一个 Chrome/Chromium。
+# 容器已有 seccomp/apparmor=unconfined + SYS_ADMIN + 可用 userns（bubblewrap
+# 所需），Chrome 命名空间沙箱因此可直接工作，无需 --no-sandbox。
+# 容器无 DISPLAY，默认走 headless（EGO_HEADLESS=1）。
+ARG EGO_LITE_REF=v0.2.0
+
+# Google Chrome（.deb 会带上全部运行库依赖）
+RUN arch="$(dpkg --print-architecture)" \
+    && sudo install -d -m 0755 /etc/apt/keyrings \
+    && curl -fsSL --connect-timeout 10 --max-time 120 https://dl.google.com/linux/linux_signing_key.pub \
+        | sudo gpg --dearmor -o /etc/apt/keyrings/google-chrome.gpg \
+    && echo "deb [arch=${arch} signed-by=/etc/apt/keyrings/google-chrome.gpg] http://dl.google.com/linux/chrome/deb/ stable main" \
+        | sudo tee /etc/apt/sources.list.d/google-chrome.list > /dev/null \
+    && sudo apt-get update \
+    && sudo apt-get install -y google-chrome-stable \
+    && sudo rm -rf /var/lib/apt/lists/* \
+    && google-chrome-stable --version
+
+# ego-lite-linux：构建 ego-browser CLI + host daemon，symlink 到 ~/.local/bin
+RUN sudo git clone --depth 1 --branch "${EGO_LITE_REF}" \
+        https://github.com/iagogfe/ego-lite-linux.git /opt/ego-lite-linux \
+    && sudo chown -R ubuntu:ubuntu /opt/ego-lite-linux \
+    && cd /opt/ego-lite-linux \
+    && CI=true bash skills/ego-browser/scripts/install-linux.sh --no-doctor \
+    && rm -rf /opt/ego-lite-linux/.git \
+    && mkdir -p /home/ubuntu/.config/opencode/skills \
+    && cp -r /opt/ego-lite-linux/skills/ego-browser /home/ubuntu/.config/opencode/skills/ego-browser \
+    && command -v ego-browser \
+    && ego-browser --version 2>/dev/null || true
+
+# 容器无 DISPLAY：默认无头；agent 用 `ego-browser nodejs <<'EOF' …` 驱动浏览器。
+ENV EGO_HEADLESS=1
 
 ENTRYPOINT ["/bin/bash", "/entrypoint.sh"]
 
