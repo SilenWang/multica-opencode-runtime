@@ -41,8 +41,16 @@ api_key_env = "DEEPSEEK_API_KEY"
 name        = "newapi"
 kind        = "openai"
 base_url    = "${NEW_API_BASE_URL:-http://192.168.8.228:3000}/v1"
-models      = ["deepseek-v4-flash", "qwen3.8-flash"]
+models      = ["deepseek-v4-flash", "deepseek-v4.1-flash", "qwen3.8-flash"]
 api_key_env = "NEW_API_KEY"
+
+# 显式声明 deepseek-v4.1-flash 支持图片输入。new-api 的 /v1/models 不返回
+# input_modalities，Reasonix 只能把它判为 unknown，图片会走 vision_model/OCR
+# 兜底而不是原生多模态；model_overrides 是 Reasonix 的 per-model 能力覆盖，
+# 优先级高于自动探测与缓存（见 Reasonix docs/MODEL_CAPABILITIES.md）。
+# 模型 ID 里含 "."，TOML 点号路径必须加引号，否则会被拆成 deepseek-v4 与 1-flash。
+[providers.model_overrides."deepseek-v4.1-flash"]
+vision = true
 REASONIX_CONFIG
 
     chmod 600 /home/ubuntu/.reasonix/.env /home/ubuntu/.reasonix/config.toml 2>/dev/null || true
@@ -85,6 +93,13 @@ if [ -n "$NEW_API_TOKEN" ]; then
       "models": {
         "deepseek-v4-flash": {
           "name": "DeepSeek V4 Flash (New-API)"
+        },
+        "deepseek-v4.1-flash": {
+          "name": "DeepSeek V4.1 Flash (New-API)",
+          "modalities": {
+            "input": ["text", "image"],
+            "output": ["text"]
+          }
         }
       }
     }
@@ -119,7 +134,7 @@ setup_cliproxyapi() {
         BRIDGE_UPSTREAM="newapi"
         BRIDGE_BASE_URL="${NEW_API_BASE_URL:-http://192.168.8.228:3000}"
         BRIDGE_TOKEN="${NEW_API_TOKEN}"
-        BRIDGE_MODELS_DEFAULT="deepseek-v4-flash,qwen3.8-flash"
+        BRIDGE_MODELS_DEFAULT="deepseek-v4-flash,deepseek-v4.1-flash,qwen3.8-flash"
     else
         BRIDGE_UPSTREAM="deepseek"
         BRIDGE_BASE_URL="https://api.deepseek.com"
