@@ -24,10 +24,16 @@ config_version = 1
 default_model = "${REASONIX_DEFAULT_MODEL:-deepseek/deepseek-v4-flash}"
 language = "zh"
 
-# 不再覆盖 [sandbox]：容器已是隔离边界，容器内 reasonix 无需再套沙箱。reasonix
-# 1.38.8 起权限 preset 接管 bash 沙箱，ACP 会话默认 workspace-write 且没有用户级
-# 默认设置；由 /opt/reasonix-acp-full-access.mjs（daemon 经 MULTICA_REASONIX_PATH
-# 选用）在会话建立时补发 tool_approval=danger-full-access，详见 Dockerfile。
+# 容器已是隔离边界，容器内不再套 reasonix 自身的沙箱：bash 不被 OS 沙箱关进
+# workspace，文件工具的写根也不再限制在某个目录。ACP 会话（multica daemon 起的任务）
+# 由 /opt/reasonix-acp-full-access.mjs 补发 tool_approval=danger-full-access 达到同样
+# 效果：daemon 会额外传 --workspace-only / --sandbox-bash auto，二者优先于本文件，
+# 所以只有 ACP 那一层能放开（详见 Dockerfile 与 README 的 Reasonix 章节）。
+# 想恢复沙箱：删掉下面 [sandbox]，并装回 bubblewrap + compose 的 security_opt/cap_add。
+[sandbox]
+bash           = "off"   # 不再用 bubblewrap 关 bash；未知值会被忽略并回落到 enforce
+workspace_root = "/"     # 文件工具（write_file/edit_file/...）的写根：整个容器
+network        = true
 
 [[providers]]
 name        = "deepseek"

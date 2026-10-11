@@ -8,7 +8,6 @@ RUN apt-get update && apt-get install -y \
     xz-utils \
     docker.io \
     docker-compose-v2 \
-    bubblewrap \
     && rm -rf /var/lib/apt/lists/*
 
 RUN curl -fsSL --connect-timeout 10 --max-time 120 \
@@ -17,10 +16,15 @@ RUN curl -fsSL --connect-timeout 10 --max-time 120 \
     tar -xJf /tmp/node.tar.xz -C /usr/local --strip-components=1 && \
     rm /tmp/node.tar.xz
     
-# Reasonix 保持不锁版本、跟随最新。1.38.8 起权限 preset 接管 bash 沙箱：ACP 新会话的
-# preset 是 workspace-write，reasonix 会用 bubblewrap 把每条 bash 关进沙箱。容器里
-# 因此必须能真正运行 bwrap（见 Dockerfile 的 bubblewrap 依赖与 docker-compose.yml 的
-# security_opt / cap_add），否则 preset 会 fail closed，任何 bash 调用都拿不到 shell。
+# Reasonix 保持不锁版本、跟随最新。1.38.8 起「权限 preset」接管 bash 沙箱与文件工具
+# 边界：ACP 新会话的 preset 固定从 workspace-write 开始，reasonix 没有用户级默认设置
+# 可以改它（实测 [desktop] default_tool_approval_mode 对 ACP 无效），multica daemon 还
+# 会传 --workspace-only / --sandbox-bash auto（优先于 ~/.reasonix/config.toml）。
+# 容器本身已是隔离边界，容器内不再套第二层沙箱，因此用
+# scripts/reasonix-acp-full-access.mjs 作为 ACP 代理，在会话建立时补发
+# tool_approval=danger-full-access；daemon 通过 MULTICA_REASONIX_PATH 使用该代理
+# （见文件末尾 ENV）。容器内的 CLI / reasonix run 等其它入口由 entrypoint 写入的
+# ~/.reasonix/config.toml [sandbox] 覆盖（bash = "off"，见 scripts/entrypoint.sh）。
 RUN npm config set registry https://registry.npmmirror.com && \
     npm config set @tencent-ai:registry https://mirrors.tencent.com/npm/ && \
     npm install -g \
@@ -73,6 +77,14 @@ RUN echo "ubuntu ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/ubuntu \
 RUN if ! getent group docker > /dev/null 2>&1; then groupadd -r docker; fi \
     && usermod -aG docker ubuntu
 
+# Reasonix ACP 代理：把容器内 reasonix 会话的权限 preset 固定为 Full access
+# （容器已是隔离边界，容器内不再套沙箱）。daemon 通过 MULTICA_REASONIX_PATH
+# 选用该可执行文件；真实 reasonix 由代理的 REASONIX_REAL_BIN 默认值解析。
+# 必须在 USER ubuntu 之前安装并加可执行位：COPY 产物默认 root 所有，
+# 切到 ubuntu 后再 chmod 会 EPERM。
+COPY scripts/reasonix-acp-full-access.mjs /opt/reasonix-acp-full-access.mjs
+RUN chmod 0755 /opt/reasonix-acp-full-access.mjs
+
 # 使用ubuntu，因为1000已经被使用 
 USER ubuntu
 WORKDIR /home/ubuntu
@@ -89,6 +101,11 @@ COPY scripts/codex-trust-plugin-hooks.mjs /codex-trust-plugin-hooks.mjs
 # （defaultMode=off）。不设全局 PONYTAIL_DEFAULT_MODE，避免覆盖用户在命令行/会话内
 # 选择的级别（命令行前缀与 `/ponytail <level>` 优先级更高）。
 ENV PATH="/home/ubuntu/.local/bin:/home/ubuntu/.pixi/bin:${PATH}"
+# daemon 用该路径作为 reasonix 可执行文件（daemon 支持 MULTICA_REASONIX_PATH），
+# 代理负责把 ACP 会话的权限 preset 设为 Full access。想恢复容器内沙箱：
+# 去掉这行 + 装回 bubblewrap + 还原 docker-compose 的 security_opt/cap_add
+# （见 README 的 Reasonix 章节）。
+ENV MULTICA_REASONIX_PATH="/opt/reasonix-acp-full-access.mjs"
 
 ENTRYPOINT ["/bin/bash", "/entrypoint.sh"]
 

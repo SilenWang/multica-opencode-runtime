@@ -28,7 +28,7 @@
 | multica | 0.4.43 | `pixi global`（channel `https://prefix.dev/sylens`） | Runtime 本体：自动登录并启动 daemon |
 | opencode | 1.18.30 | `pixi global`（同上 channel） | |
 | Codex CLI | 0.154.0 | `npm -g @openai/codex` | |
-| Reasonix | 最新 | `npm -g reasonix` | 容器内 bash 沙箱依赖 `bubblewrap`（见 [Reasonix](#reasonix) 章节） |
+| Reasonix | 最新 | `npm -g reasonix` | 容器内默认 **Full access**（无内层沙箱，见 [Reasonix](#reasonix) 章节） |
 | CLIProxyAPI | 7.2.146 | GitHub Release 固定版本 + SHA256 校验，装到 `/usr/local/bin/cliproxyapi` | Codex 协议转换桥接 |
 | ponytail | v4.9.0 | `git clone --depth 1 --branch v4.9.0` → `/opt/ponytail` | 仅 Codex 的插件，默认关闭 |
 | gh (GitHub CLI) | 2.45.0 | `apt` | 容器启动时交互式登录 |
@@ -146,6 +146,11 @@ New-API 上游会经内置的 CLIProxyAPI 桥接（见下节）；DeepSeek 官�
   default_model = "deepseek/deepseek-v4-flash"
   language = "zh"
 
+  [sandbox]                    # 容器内不再套沙箱，见下方「权限 / 沙箱」
+  bash = "off"
+  workspace_root = "/"
+  network = true
+
   [[providers]]                # deepseek 官方
   name = "deepseek"
   base_url = "https://api.deepseek.com"
@@ -168,25 +173,42 @@ reasonix run --model deepseek "..."        # 切到 DeepSeek 官方
 
 可选：`REASONIX_DEFAULT_MODEL` 覆盖默认模型（默认 `deepseek/deepseek-v4-flash`）。
 
-> **bash 沙箱（已启用）**：Reasonix **1.38.8 起权限 preset（read-only / workspace-write）
-> 接管 bash 沙箱**，ACP 新会话的 preset 是 `workspace-write`，reasonix 会用
-> **bubblewrap** 把每条 bash 关进沙箱；`[sandbox] bash = "off"` 在该版本起不再生效
-> （`[desktop] default_tool_approval_mode` / `[bot] tool_approval_mode` 也不作用于 ACP，
-> 实测无效）。若容器里 bwrap 起不来，preset 会 **fail closed**，任何 bash 调用都拿不到
-> shell。
+> **权限 / 沙箱（默认 Full access）**：容器本身就是隔离边界，容器内的 reasonix 不再套
+> 第二层沙箱，写文件与执行命令都不受 reasonix 自身沙箱限制。
 >
-> 因此本容器把沙箱真正跑起来：
-> - `Dockerfile` 安装 `bubblewrap`；
-> - `docker-compose.yml` 放开 `security_opt: [seccomp=unconfined, apparmor=unconfined]`
->   并 `cap_add: [SYS_ADMIN]` —— Docker 默认 seccomp 拦 `unshare`/`clone(CLONE_NEW*)`、
->   默认 AppArmor 拦 `mount`，缺这三项 bwrap 会报 `Creating new namespace failed` /
->   `Failed to make / slave`。
+> 背景（reasonix 1.38.11 实测）：**1.38.8 起「权限 preset」（read-only /
+> workspace-write / danger-full-access）接管 bash 沙箱与文件工具边界**。ACP 新会话的
+> preset 固定从 `workspace-write` 开始，reasonix 没有用户级默认设置可以改它
+> （`[desktop] default_tool_approval_mode` / `[bot] tool_approval_mode` 对 ACP 无效）；
+> 唯一开关是 ACP 协议里的 `session/set_config_option {configId: "tool_approval"}`，
+> 而 multica daemon 不发这个请求，它反而会给 reasonix 传
+> `--workspace-only --sandbox-bash auto`（**命令行参数优先于 `~/.reasonix/config.toml`**）。
+> 所以「只改容器内的 reasonix 配置」不足以放开 daemon 起的任务，两条路都要走：
 >
-> 这样 reasonix 跟随最新版本，同时保留自身的 bash 沙箱（容器边界 + bwrap 双层）。
-> 注意这三项放宽了容器的 seccomp/AppArmor 并多给了 `SYS_ADMIN`；若不需要沙箱，可去掉
-> 它们并改用其它方式（如把会话切到 Full access）。
-> 若只想快速恢复而暂不改 compose，也可降级到 `reasonix@1.38.7` 并设
-> `[sandbox] bash = "off"`（该版本仍认这个设置）。
+> - **ACP 会话（multica 任务）**：`scripts/reasonix-acp-full-access.mjs` 作为 ACP 代理，
+>   在 `session/new`（含 resume/load）响应放行前补发
+>   `session/set_config_option {configId: "tool_approval", value: "danger-full-access"}`。
+>   Dockerfile 把它装到 `/opt` 并设 `MULTICA_REASONIX_PATH`（daemon 认这个环境变量），
+>   真实 reasonix 由代理的 `REASONIX_REAL_BIN` 默认值解析；非 `acp` 调用原样透传。
+>   实测 1.38.11：代理日志 `tool_approval=danger-full-access applied`，reasonix 随后
+>   发给客户端的 `config_option_update` 通知里 `tool_approval = danger-full-access`。
+> - **CLI / `reasonix run` / serve / bot**：`setup_reasonix` 写入的
+>   `~/.reasonix/config.toml` 里 `[sandbox]` 设为 `bash = "off"`（不再用 bubblewrap 关
+>   bash）、`workspace_root = "/"`（文件工具的写根放到整个容器）、`network = true`。
+>
+> 注意：Multica 的 daemon 还会把每个任务的根文件系统挂成 **read-only**（只有任务
+> workdir 与 `/tmp` 可写，本容器实测），所以「不受限制」是在 daemon 给的边界内——
+> 容器里其它可写位置（`/tmp`、挂载进来的卷）都能用，只读位置仍然写不进去。
+>
+> 想**恢复容器内沙箱**（reasonix 跟随最新版，沙箱由 bubblewrap 提供）：
+> 删掉 Dockerfile 里的 `ENV MULTICA_REASONIX_PATH` 与 entrypoint 写的 `[sandbox]` 段，
+> `apt` 装回 `bubblewrap`，并把 `docker-compose.yml` 的
+> `security_opt: [seccomp=unconfined, apparmor=unconfined]` 与 `cap_add: [SYS_ADMIN]`
+> 加回来（Docker 默认 seccomp 拦 `unshare`/`clone(CLONE_NEW*)`、默认 AppArmor 拦
+> `mount`，缺这三项 bwrap 起不来，受限 preset 会 fail closed）。
+> 另外一个回退点：如果将来 reasonix 改了 ACP 的权限开关，代理会在 daemon 日志里打
+> `tool_approval=... REJECTED: ...` 并让会话退回 `workspace-write`；如果又同时没有
+> bubblewrap，bash 会 fail closed——这时按上面的步骤装回 bubblewrap 即可。
 
 ## 插件
 
