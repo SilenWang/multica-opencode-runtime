@@ -2,6 +2,49 @@
 # 遇到错误立即停止运行
 set -e
 
+# 0. 虚拟显示（方案 A：headed Chrome）
+#
+# 容器没有真实显示器，ego-browser 的 host 默认以 headed 模式启动 Chrome，需要
+# DISPLAY。这里用 Xvfb 提供一个虚拟 X11 屏幕：headed Chrome 就是真实浏览器，
+# UA / 渲染 / 语言环境都正常，不需要给上游 ego-lite-linux 打任何补丁。
+# 外部已经提供可用显示时直接复用；启动失败只告警，可在 .env 设 EGO_HEADLESS=1
+# 走无头降级（无头模式不需要 DISPLAY）。
+setup_xvfb() {
+    local display="${DISPLAY:-:99}"
+    local num="${display#:}"
+    num="${num%%.*}"
+
+    if [ -n "${num}" ] && [ -S "/tmp/.X11-unix/X${num}" ]; then
+        echo "X display ${display} 已存在，复用。"
+        export DISPLAY="${display}"
+        return 0
+    fi
+
+    if ! command -v Xvfb > /dev/null 2>&1; then
+        echo "WARNING: Xvfb 未安装，Chrome 无法以 headed 模式启动；可设 EGO_HEADLESS=1 降级。"
+        return 0
+    fi
+
+    echo "启动 Xvfb ${display} (${XVFB_SCREEN:-1920x1080x24})..."
+    Xvfb "${display}" -screen 0 "${XVFB_SCREEN:-1920x1080x24}" -nolisten tcp > /tmp/xvfb.log 2>&1 &
+    local pid=$!
+    local i
+    for i in $(seq 1 50); do
+        if [ -S "/tmp/.X11-unix/X${num}" ]; then
+            export DISPLAY="${display}"
+            echo "Xvfb 已就绪：DISPLAY=${display} (pid ${pid}, log /tmp/xvfb.log)"
+            return 0
+        fi
+        if ! kill -0 "${pid}" 2> /dev/null; then
+            break
+        fi
+        sleep 0.1
+    done
+
+    echo "WARNING: Xvfb 启动失败（详见 /tmp/xvfb.log）；可设 EGO_HEADLESS=1 降级。" >&2
+    return 0
+}
+
 # 1. 配置 Reasonix（DEEPSEEK_API_KEY + NEW_API_KEY 写入 ~/.reasonix/.env + config.toml）
 setup_reasonix() {
     if [ -z "${DEEPSEEK_TOKEN:-}" ] && [ -z "${NEW_API_TOKEN:-}" ]; then
@@ -375,6 +418,9 @@ setup_ponytail() {
 }
 
 setup_ponytail
+
+# 1.5 虚拟显示：headed Chrome 需要 DISPLAY（失败不影响容器启动，可降级为无头）
+setup_xvfb
 
 # 2. Multica 登录
 echo "准备设置Multica"

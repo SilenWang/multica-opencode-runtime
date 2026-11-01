@@ -34,5 +34,7 @@ services:
               capabilities: [gpu]
     stdin_open: true
     tty: true
+    # headed Chrome 在 Xvfb 下需要更大的 /dev/shm（默认 64MB 容易触发渲染进程崩溃）
+    shm_size: "1gb"
     devices:
       - /dev/dri:/dev/dri

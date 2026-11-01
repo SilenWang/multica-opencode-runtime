@@ -9,6 +9,12 @@ RUN apt-get update && apt-get install -y \
     docker.io \
     docker-compose-v2 \
     bubblewrap \
+    xvfb \
+    locales \
+    tzdata \
+    && (grep -q '^zh_CN.UTF-8 UTF-8$' /etc/locale.gen || echo 'zh_CN.UTF-8 UTF-8' >> /etc/locale.gen) \
+    && (grep -q '^en_US.UTF-8 UTF-8$' /etc/locale.gen || echo 'en_US.UTF-8 UTF-8' >> /etc/locale.gen) \
+    && locale-gen \
     && rm -rf /var/lib/apt/lists/*
 
 # Node 走 npmmirror 镜像（国内构建网络下 nodejs.org 常超时），失败再回退官方源。
@@ -95,14 +101,18 @@ COPY scripts/codex-trust-plugin-hooks.mjs /codex-trust-plugin-hooks.mjs
 ENV PATH="/home/ubuntu/.local/bin:/home/ubuntu/.pixi/bin:${PATH}"
 
 # ---------------------------------------------------------------------------
-# 可选：浏览器上网能力（ego-browser / ego-lite-linux + Google Chrome，headless）
+# 可选：浏览器上网能力（ego-browser / ego-lite-linux + Google Chrome，headed + Xvfb）
 # ---------------------------------------------------------------------------
 # 说明：上游 citrolabs/ego-lite 官方只发 macOS DMG；这里用社区 Linux host
 # iagogfe/ego-lite-linux（MIT，MVP v0.2.0），它基于 stock Chromium + CDP，
 # 不改内核、不 fork 浏览器，只要求 Node ≥22 与一个 Chrome/Chromium。
 # 容器已有 seccomp/apparmor=unconfined + SYS_ADMIN + 可用 userns（bubblewrap
 # 所需），Chrome 命名空间沙箱因此可直接工作，无需 --no-sandbox。
-# 容器无 DISPLAY，默认走 headless（EGO_HEADLESS=1）。
+# 浏览器走 headed 模式（方案 A）：容器没有真实显示器，由 entrypoint 启动一个
+# Xvfb 提供 DISPLAY，ego-linux-host 按默认（headed）路径拉起 Chrome。headed Chrome
+# 本身就是真实浏览器：UA 不含 HeadlessChrome、语言/渲染/扩展环境都是真的，因此
+# 不需要给上游 ego-lite-linux 打任何补丁，上游代码按 tag 原样构建。
+# EGO_HEADLESS=1 仍可作为显式降级（不依赖 Xvfb），只是不再是默认路径。
 ARG EGO_LITE_REF=v0.2.0
 
 # Google Chrome（.deb 会带上全部运行库依赖）
@@ -129,8 +139,14 @@ RUN sudo git clone --depth 1 --branch "${EGO_LITE_REF}" \
     && command -v ego-browser \
     && ego-browser --version 2>/dev/null || true
 
-# 容器无 DISPLAY：默认无头；agent 用 `ego-browser nodejs <<'EOF' …` 驱动浏览器。
-ENV EGO_HEADLESS=1
+# Xvfb 的显示号固定为 :99，entrypoint 启动时拉起（已存在则复用，见 scripts/entrypoint.sh）。
+# LANG/LANGUAGE 让 headed Chrome 以中文界面运行（navigator.language = zh-CN），
+# TZ 跟随中国时区，避免 UA / 语言 / 时区互相矛盾；三者都是容器级设置，
+# 不依赖任何上游改动。
+ENV DISPLAY=:99 \
+    LANG=zh_CN.UTF-8 \
+    LANGUAGE=zh_CN:zh \
+    TZ=Asia/Shanghai
 
 ENTRYPOINT ["/bin/bash", "/entrypoint.sh"]
 
