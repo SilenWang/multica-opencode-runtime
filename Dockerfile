@@ -101,7 +101,7 @@ COPY scripts/codex-trust-plugin-hooks.mjs /codex-trust-plugin-hooks.mjs
 ENV PATH="/home/ubuntu/.local/bin:/home/ubuntu/.pixi/bin:${PATH}"
 
 # ---------------------------------------------------------------------------
-# 可选：浏览器上网能力（ego-browser / ego-lite-linux + Google Chrome，headless）
+# 可选：浏览器上网能力（ego-browser / ego-lite-linux + Google Chrome，headed + Xvfb）
 # ---------------------------------------------------------------------------
 # 说明：上游 citrolabs/ego-lite 官方只发 macOS DMG；这里用社区 Linux host
 # iagogfe/ego-lite-linux（MIT，MVP v0.2.0），它基于 stock Chromium + CDP，
