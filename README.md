@@ -38,6 +38,7 @@
 | Google Chrome | 最新 stable | `apt google-chrome-stable` | 无头浏览器二进制 |
 | ego-browser | v0.2.0（ego-lite-linux，未打补丁） | `install-linux.sh` 构建后装到 `~/.local/bin` | agent 驱动浏览器的 CLI + host daemon（见 [浏览器](#浏览器ego-browser)） |
 | curl / git / sudo / xz-utils | - | `apt` | |
+| fonts-noto-cjk / fonts-noto-color-emoji | - | `apt` | 中文字体与彩色 emoji，另附 `scripts/fonts-noto-cjk-zh.conf` 补 `lang=zh` 映射；缺失时浏览器截图里的中文会渲染成方块 |
 
 其它环境特性：
 

@@ -1,5 +1,9 @@
 FROM ghcr.io/prefix-dev/pixi:0.76.1-noble-cuda-13.0.0
 
+# fonts-noto-cjk：基础镜像只自带 fonts-liberation（纯拉丁），Chrome/fontconfig 找不到
+# CJK 字形，中文网页会整片渲染成方块（tofu）。这里预装 Noto CJK（含 SC/TC/JP/HK/KR）
+# 与彩色 emoji 字体。必须在镜像里装：放到 entrypoint 或运行时手动 apt install，
+# 容器重建后会丢失。
 RUN apt-get update && apt-get install -y \
     curl \
     git \
@@ -12,10 +16,17 @@ RUN apt-get update && apt-get install -y \
     xvfb \
     locales \
     tzdata \
+    fonts-noto-cjk \
+    fonts-noto-color-emoji \
     && (grep -q '^zh_CN.UTF-8 UTF-8$' /etc/locale.gen || echo 'zh_CN.UTF-8 UTF-8' >> /etc/locale.gen) \
     && (grep -q '^en_US.UTF-8 UTF-8$' /etc/locale.gen || echo 'en_US.UTF-8 UTF-8' >> /etc/locale.gen) \
     && locale-gen \
     && rm -rf /var/lib/apt/lists/*
+
+# fonts-noto-cjk 自带的 70-fonts-noto-cjk.conf 只映射 zh-cn / zh-tw / zh-hk，
+# 查询写 lang=zh 时仍会退回拉丁字体，因此补一条通用 zh 的映射并重建缓存。
+COPY scripts/fonts-noto-cjk-zh.conf /etc/fonts/conf.d/71-fonts-noto-cjk-zh.conf
+RUN fc-cache -f
 
 # Node 走 npmmirror 镜像（国内构建网络下 nodejs.org 常超时），失败再回退官方源。
 RUN curl -fsSL --connect-timeout 10 --max-time 300 \
