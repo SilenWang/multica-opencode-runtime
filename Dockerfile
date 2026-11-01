@@ -1,4 +1,6 @@
-FROM ghcr.io/prefix-dev/pixi:0.76.1-noble-cuda-13.0.0
+# 基础层（target=base）：通用 runtime，不含任何领域专用工具。
+# 领域专用工具叠在上面做变体，见文件末尾的 bioinfo 阶段。
+FROM ghcr.io/prefix-dev/pixi:0.76.1-noble-cuda-13.0.0 AS base
 
 RUN apt-get update && apt-get install -y \
     curl \
@@ -135,3 +137,53 @@ ENV EGO_HEADLESS=1
 ENTRYPOINT ["/bin/bash", "/entrypoint.sh"]
 
 CMD ["bash"]
+
+# ---------------------------------------------------------------------------
+# 可选变体：bioinfo（生物信息工具层）
+# ---------------------------------------------------------------------------
+# base 阶段刻意保持通用；生信工具只在需要时叠加：
+#
+#   docker compose build                      # 默认只构建 base
+#   RUNTIME_VARIANT=bioinfo docker compose build
+#
+# compose 通过 build.target 选择阶段（见 docker-compose.yml），因此两个变体共享
+# base 的全部层与构建缓存，bioinfo 只是 base 之上新增的一层。
+#
+# 依赖仍然由 pixi 管理（与 base 里安装 opencode/multica 同一套机制），容器内不需要
+# conda/mamba。bioconda 的包按惯例排在 conda-forge 之后。
+# 需要更多工具时不用改 Dockerfile：
+#   BIO_PACKAGES          覆盖默认清单
+#   BIO_EXTRA_PACKAGES    在默认清单上追加
+#   BIO_CHANNELS          渠道列表（默认清华 TUNA 镜像，与仓库其它国内镜像策略一致）
+#   BIO_FALLBACK_CHANNELS 第一组渠道装不上时换这一组（默认官方源）
+# 例如：docker compose build --build-arg BIO_EXTRA_PACKAGES="multiqc bwa bwa-mem2"
+FROM base AS bioinfo
+
+ARG BIO_PACKAGES="samtools bcftools bedtools seqkit fastqc pigz"
+ARG BIO_EXTRA_PACKAGES=""
+ARG BIO_CHANNELS="https://mirrors.tuna.tsinghua.edu.cn/anaconda/cloud/conda-forge https://mirrors.tuna.tsinghua.edu.cn/anaconda/cloud/bioconda"
+ARG BIO_FALLBACK_CHANNELS="conda-forge bioconda"
+
+# conda 通道偶发 TLS 断连（peer closed connection without sending TLS close_notify），
+# 一个包没下来整层就失败；重试时已装好的环境会跳过，只补失败的包。
+# 一组渠道重试后仍有包缺失，就换下一组渠道（镜像 -> 官方）。
+RUN set -eu; \
+    missing=""; \
+    for channels in "$BIO_CHANNELS" "$BIO_FALLBACK_CHANNELS"; do \
+        [ -n "$channels" ] || continue; \
+        set --; \
+        for channel in $channels; do set -- "$@" -c "$channel"; done; \
+        attempt=0; \
+        until pixi global install "$@" ${BIO_PACKAGES} ${BIO_EXTRA_PACKAGES}; do \
+            attempt=$((attempt + 1)); \
+            if [ "$attempt" -ge 2 ]; then echo "bioinfo: 渠道 [$channels] 安装失败，换下一组渠道" >&2; break; fi; \
+            echo "bioinfo: 安装中断，重试（渠道：$channels）" >&2; \
+        done; \
+        missing=""; \
+        for pkg in ${BIO_PACKAGES} ${BIO_EXTRA_PACKAGES}; do \
+            pixi global list | grep -q "── ${pkg}: " || missing="${missing} ${pkg}"; \
+        done; \
+        [ -n "$missing" ] || break; \
+    done; \
+    pixi global list; \
+    if [ -n "$missing" ]; then echo "bioinfo: 以下包未装上:${missing}" >&2; exit 1; fi
