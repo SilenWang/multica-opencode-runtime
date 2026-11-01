@@ -31,7 +31,7 @@
 | Reasonix | 最新 | `npm -g reasonix` | 容器内 bash 沙箱依赖 `bubblewrap`（见 [Reasonix](#reasonix) 章节） |
 | CLIProxyAPI | 7.2.146 | GitHub Release 固定版本 + SHA256 校验，装到 `/usr/local/bin/cliproxyapi` | Codex 协议转换桥接 |
 | ponytail | v4.9.0 | `git clone --depth 1 --branch v4.9.0` → `/opt/ponytail` | 仅 Codex 的插件，默认关闭 |
-| gh (GitHub CLI) | 2.45.0 | `apt` | 容器启动时交互式登录 |
+| gh (GitHub CLI) | 2.45.0 | `apt` | 容器启动时检测登录（未登录不阻塞，可手动认证） |
 | docker CLI | 29.1.3 | `apt docker.io` | 配合挂载的宿主机 docker socket |
 | docker compose | 2.40.3 | `apt docker-compose-v2` | |
 | curl / git / sudo / xz-utils | - | `apt` | |
@@ -63,7 +63,7 @@ docker-compose up -d
 | `DOCKER_HOST_GID` | 否 | 宿主机 docker 组 GID，默认 `999`（见下） |
 
 - multica 使用 token 登录：`MULTICA_TOKEN` 与运行时编码绑定，手动生成并保存有助于恢复运行时容器。
-- GitHub 需在容器启动后手动认证：用 `docker logs YOU_CONTAINER_NAME_FOR_RUNTIME` 查看日志里的验证码，打开 `https://github.com/login/device` 完成认证。认证后权限与 GitHub 网页端一致，无需额外配置私有仓库/组织权限。
+- GitHub 未登录不会影响容器启动：容器会正常保持运行。进入容器后执行 `gh auth login` 完成认证（或在 `.env` 里设置 `GH_TOKEN` / `GITHUB_TOKEN`，启动时自动登录）。认证后权限与 GitHub 网页端一致，无需额外配置私有仓库/组织权限。
 
 ## Agent 与 API 接入
 

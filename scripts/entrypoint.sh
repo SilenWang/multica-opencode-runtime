@@ -387,9 +387,42 @@ if [ -n "$MULTICA_TOKEN" ]; then
 fi
 
 
-# 5. Github登录（放最后，避免阻塞前面的自动化配置）
+# 5. Github 登录（放最后，避免阻塞前面的自动化配置）
+#
+# 关键：GitHub 未登录时绝不能中断 entrypoint。旧实现直接执行
+# `echo ... | gh auth login -w`（设备码 web 登录）：容器无人值守时它会一直阻塞
+# 等待用户在浏览器完成授权，超时后返回非零，配合文件顶部的 `set -e` 直接让
+# entrypoint 退出、`exec "$@"` 永不执行，容器随之关闭。
+# 现在只在已登录或提供了 token 时自动认证；否则仅打印提示并继续，容器保持运行，
+# 用户可随时进入容器执行 `gh auth login` 完成登录。
+setup_github() {
+    if ! command -v gh > /dev/null 2>&1; then
+        echo "WARNING: gh not installed; GitHub setup skipped."
+        return 0
+    fi
+
+    if gh auth status --hostname github.com > /dev/null 2>&1; then
+        echo "GitHub CLI 已登录，跳过。"
+        return 0
+    fi
+
+    # 可选：通过 GH_TOKEN / GITHUB_TOKEN 做非交互式登录（便于无人值守）
+    local gh_token="${GH_TOKEN:-${GITHUB_TOKEN:-}}"
+    if [ -n "${gh_token}" ]; then
+        if printf '%s\n' "${gh_token}" | gh auth login --hostname github.com --with-token > /dev/null 2>&1; then
+            echo "GitHub CLI 已通过 GH_TOKEN/GITHUB_TOKEN 登录。"
+        else
+            echo "WARNING: GitHub token 登录失败；容器继续运行，可稍后手动执行 'gh auth login'。"
+        fi
+        return 0
+    fi
+
+    echo "GitHub CLI 未登录。容器保持运行；进入容器后执行 'gh auth login' 完成认证。"
+    return 0
+}
+
 echo "准备设置 Github"
-echo -e "\n\n\n" | gh auth login --hostname github.com -w
+setup_github
 
 # 继续运行
 exec "$@"
