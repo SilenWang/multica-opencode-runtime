@@ -440,7 +440,11 @@ fi
 # 等待用户在浏览器完成授权，超时后返回非零，配合文件顶部的 `set -e` 直接让
 # entrypoint 退出、`exec "$@"` 永不执行，容器随之关闭。
 # 现在只在已登录或提供了 token 时自动认证；否则仅打印提示并继续，容器保持运行，
-# 用户可随时进入容器执行 `gh auth login` 完成登录。
+# 用户可随时进入容器执行 `BROWSER=false gh auth login` 完成登录。
+#
+# 为什么带 BROWSER=false：镜像里装了 headed Chrome + Xvfb，gh 检测到浏览器后会走
+# 自动打开浏览器的分支，设备验证码刷不出来或一闪而过，日志里看不到。关掉浏览器
+# 打开后 gh 会老老实实把 one-time code 打印在终端/日志里，用户自己粘贴到网页即可。
 setup_github() {
     if ! command -v gh > /dev/null 2>&1; then
         echo "WARNING: gh not installed; GitHub setup skipped."
@@ -458,12 +462,12 @@ setup_github() {
         if printf '%s\n' "${gh_token}" | gh auth login --hostname github.com --with-token > /dev/null 2>&1; then
             echo "GitHub CLI 已通过 GH_TOKEN/GITHUB_TOKEN 登录。"
         else
-            echo "WARNING: GitHub token 登录失败；容器继续运行，可稍后手动执行 'gh auth login'。"
+            echo "WARNING: GitHub token 登录失败；容器继续运行，可稍后手动执行 'BROWSER=false gh auth login'。"
         fi
         return 0
     fi
 
-    echo "GitHub CLI 未登录。容器保持运行；进入容器后执行 'gh auth login' 完成认证。"
+    echo "GitHub CLI 未登录。容器保持运行；进入容器后执行 'BROWSER=false gh auth login'，按提示把设备验证码粘贴到网页完成认证。"
     return 0
 }
 

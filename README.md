@@ -67,7 +67,8 @@ docker-compose up -d
 | `DOCKER_HOST_GID` | 否 | 宿主机 docker 组 GID，默认 `999`（见下） |
 
 - multica 使用 token 登录：`MULTICA_TOKEN` 与运行时编码绑定，手动生成并保存有助于恢复运行时容器。
-- GitHub 未登录不会影响容器启动：容器会正常保持运行。进入容器后执行 `gh auth login` 完成认证（或在 `.env` 里设置 `GH_TOKEN` / `GITHUB_TOKEN`，启动时自动登录）。认证后权限与 GitHub 网页端一致，无需额外配置私有仓库/组织权限。
+- GitHub 未登录不会影响容器启动：容器会正常保持运行。进入容器后执行 `BROWSER=false gh auth login` 完成认证（或在 `.env` 里设置 `GH_TOKEN` / `GITHUB_TOKEN`，启动时自动登录）。认证后权限与 GitHub 网页端一致，无需额外配置私有仓库/组织权限。
+  - 为什么要带 `BROWSER=false`：镜像里预装了 headed Chrome + Xvfb，`gh` 检测到浏览器可打开时会尝试自己拉起浏览器，设备验证码看不到（日志里也刷不出来）。关掉浏览器后 `gh` 会把 one-time code 直接打印在终端里，按提示粘贴到 `https://github.com/login/device` 即可。
 
 ## Agent 与 API 接入
 
