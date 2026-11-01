@@ -10,6 +10,7 @@
 - [Agent 与 API 接入](#agent-与-api-接入)
 - [插件](#插件)
 - [CLIProxyAPI 桥接](#cliproxyapi-桥接)
+- [浏览器（ego-browser）](#浏览器ego-browser)
 - [数据持久化](#数据持久化)
 - [容器内使用 Docker](#容器内使用-docker)
 - [重置容器](#重置容器)
@@ -34,6 +35,8 @@
 | gh (GitHub CLI) | 2.45.0 | `apt` | 容器启动时检测登录（未登录不阻塞，可手动认证） |
 | docker CLI | 29.1.3 | `apt docker.io` | 配合挂载的宿主机 docker socket |
 | docker compose | 2.40.3 | `apt docker-compose-v2` | |
+| Google Chrome | 最新 stable | `apt google-chrome-stable` | 无头浏览器二进制 |
+| ego-browser | v0.2.0（ego-lite-linux，未打补丁） | `install-linux.sh` 构建后装到 `~/.local/bin` | agent 驱动浏览器的 CLI + host daemon（见 [浏览器](#浏览器ego-browser)） |
 | curl / git / sudo / xz-utils | - | `apt` | |
 
 其它环境特性：
@@ -244,6 +247,38 @@ codex ──responses──> 127.0.0.1:8317 (CLIProxyAPI) ──chat/completions
 | `CLIPROXY_MODELS` | 跟随上游 | 模型映射 `上游模型名:Codex侧名字`，逗号分隔，省略 `:别名` 时两边同名 |
 
 排查：`tail -f ~/.cli-proxy-api/logs/cliproxyapi.log`，或 `curl -s http://127.0.0.1:8317/v1/models -H "Authorization: Bearer $(cat ~/.cli-proxy-api/api_key)"`。
+
+## 浏览器（ego-browser）
+
+容器内预装 [ego-browser](https://github.com/iagogfe/ego-lite-linux)（社区 Linux host + Google Chrome），agent 可以直接驱动一个共享浏览器：
+
+```bash
+ego-browser nodejs <<'EOF'
+const task = await taskSpaces.useOrCreate('打开示例页')
+await browser.openOrReuseTab('https://example.com', { wait: true, timeout: 20000 })
+console.log(await page.title())
+EOF
+```
+
+浏览器以 **headed 模式**运行：entrypoint 在容器启动时拉起一个 Xvfb 虚拟显示（`DISPLAY=:99`，屏幕
+`1920x1080x24`），ego-linux-host 按默认的 headed 路径启动 Chrome。这样 Chrome 就是真实浏览器——
+UA 不含 `HeadlessChrome`、语言/渲染/扩展环境都是真的，闲鱼这类按 UA 做风控的站点会返回正常首页，
+而不是“非法访问 / 请使用正常浏览器访问”。上游 ego-lite-linux 按 tag 原样构建，**没有为浏览器身份
+打任何补丁**。
+
+| 变量 | 默认 | 说明 |
+| --- | --- | --- |
+| `DISPLAY` | `:99` | Xvfb 显示号；entrypoint 发现该显示已存在时直接复用 |
+| `XVFB_SCREEN` | `1920x1080x24` | Xvfb 屏幕尺寸与色深 |
+| `LANG` / `LANGUAGE` | `zh_CN.UTF-8` / `zh_CN:zh` | Chrome 界面语言 → `navigator.language(s)` |
+| `TZ` | `Asia/Shanghai` | 容器时区，避免 UA / 语言 / 时区互相矛盾 |
+| `EGO_HEADLESS` | 未设置（headed） | 设为 `1` 走无头降级：不依赖 Xvfb，但 UA 会带 `HeadlessChrome` |
+
+Xvfb 启动失败只告警，容器照常运行；此时可以设 `EGO_HEADLESS=1` 降级，或自行提供可用的 `DISPLAY`。
+headed Chrome 需要更大的 `/dev/shm`，compose 里已设置 `shm_size`。日志在容器内 `/tmp/xvfb.log`。
+
+这层设置只让浏览器以真实浏览器身份工作，用于合法浏览与取数，不用于绕过登录、验证码或访问控制；
+遇到验证码按 ego-browser 规范走 `taskSpaces.handOff` 交给用户。
 
 ## 数据持久化
 
