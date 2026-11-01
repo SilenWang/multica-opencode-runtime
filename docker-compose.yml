@@ -5,6 +5,9 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      # 镜像变体：base（默认，通用）或 bioinfo（base + 生信工具）。
+      # 在 .env 里设 RUNTIME_VARIANT=bioinfo 即可在 docker compose build 时叠加该层。
+      target: ${RUNTIME_VARIANT:-base}
     container_name: ${CONTAINER_NAME}
     hostname: ${CONTAINER_NAME}
     env_file:

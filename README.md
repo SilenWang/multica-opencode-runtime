@@ -6,6 +6,7 @@
 
 - [内置组件](#内置组件)
 - [构建与启动](#构建与启动)
+- [镜像变体（可选层）](#镜像变体可选层)
 - [首次配置](#首次配置)
 - [Agent 与 API 接入](#agent-与-api-接入)
 - [插件](#插件)
@@ -42,12 +43,59 @@
 - `ubuntu` 用户拥有免密 sudo，且已加入镜像内的 `docker` 组。
 - 容器内可直接调用宿主机 Docker（见 [容器内使用 Docker](#容器内使用-docker)）。
 
+上表是默认的 `base` 层。生信等专用工具按需叠加，见 [镜像变体（可选层）](#镜像变体可选层)。
+
 ## 构建与启动
 
 ```bash
 docker-compose build
 docker-compose up -d
 ```
+
+## 镜像变体（可选层）
+
+`Dockerfile` 用多阶段构建把镜像分成两层：`base` 是通用 runtime（agent 工具链），`bioinfo` 在 `base` 之上再叠一层生信工具。`docker compose build` 通过 `RUNTIME_VARIANT`（即 compose 的 `build.target`）选择构建到哪一层，默认只构建 `base`。
+
+| `RUNTIME_VARIANT` | 构建的阶段 | 内容 |
+| --- | --- | --- |
+| 不设置 / `base` | `base` | 通用 runtime，见 [内置组件](#内置组件) |
+| `bioinfo` | `bioinfo` | `base` + `samtools`、`bcftools`、`bedtools`、`seqkit`、`fastqc`、`pigz` |
+
+```bash
+docker compose build                              # 默认：只构建通用 base
+RUNTIME_VARIANT=bioinfo docker compose build      # 叠加生信层
+```
+
+也可以写进 `.env`（`RUNTIME_VARIANT=bioinfo`），之后所有 `docker compose` 命令都使用该变体。
+
+两个变体的 compose 配置完全一致（GPU、docker socket、挂载、`CONTAINER_NAME` 都相同），切换变体只需重建镜像和容器：
+
+```bash
+RUNTIME_VARIANT=bioinfo docker compose up -d --build   # 切到 bioinfo
+docker compose up -d --build                          # 切回 base
+```
+
+生信层同样由 pixi 安装（`pixi global install -c conda-forge -c bioconda ...`），容器内不需要 conda / mamba，命令直接在 `PATH` 上。加工具不用改 `Dockerfile`：
+
+```bash
+docker compose build --build-arg BIO_EXTRA_PACKAGES="multiqc bwa bwa-mem2"  # 追加
+docker compose build --build-arg BIO_PACKAGES="samtools multiqc"            # 覆盖默认清单
+```
+
+渠道默认走清华 TUNA 镜像（国内拉取明显更快），装不上时自动回退官方 `conda-forge` + `bioconda`；要固定用官方源：
+
+```bash
+docker compose build --build-arg BIO_CHANNELS="conda-forge bioconda" --build-arg BIO_FALLBACK_CHANNELS=""
+```
+
+> `--build-arg` 只对本次构建生效，且不同变体写的是同一个镜像标签。需要长期复用某套包列表时，按下面的方式固化成自己的变体。
+
+新增一个变体（例如 `rna`）只需要两处改动：
+
+1. 在 `Dockerfile` 末尾加一个阶段，`FROM bioinfo AS rna`（或 `FROM base AS rna`），在其中 `RUN pixi global install -c conda-forge -c bioconda ...`；
+2. 在上面的表格里补一行，然后 `RUNTIME_VARIANT=rna docker compose build`。
+
+变体名写错时构建会直接报 `target stage ... could not be found`，不会悄悄退化成 `base`。
 
 ## 首次配置
 
