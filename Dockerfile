@@ -4,6 +4,9 @@ FROM ghcr.io/prefix-dev/pixi:0.76.1-noble-cuda-13.0.0
 # CJK 字形，中文网页会整片渲染成方块（tofu）。这里预装 Noto CJK（含 SC/TC/JP/HK/KR）
 # 与彩色 emoji 字体。必须在镜像里装：放到 entrypoint 或运行时手动 apt install，
 # 容器重建后会丢失。
+# fontconfig 必须显式写在这里：fc-cache / fc-list / fc-match 都由 fontconfig 包提供，
+# 而 fonts-noto-cjk 没有任何 Depends，基础镜像里是后面 Chrome 的 .deb 才把 fontconfig
+# 拉进来的——那时下面的 fc-cache 早已执行，构建会直接 "fc-cache: not found"。
 RUN apt-get update && apt-get install -y \
     curl \
     git \
@@ -16,6 +19,7 @@ RUN apt-get update && apt-get install -y \
     xvfb \
     locales \
     tzdata \
+    fontconfig \
     fonts-noto-cjk \
     fonts-noto-color-emoji \
     && (grep -q '^zh_CN.UTF-8 UTF-8$' /etc/locale.gen || echo 'zh_CN.UTF-8 UTF-8' >> /etc/locale.gen) \
@@ -24,9 +28,12 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 # fonts-noto-cjk 自带的 70-fonts-noto-cjk.conf 只映射 zh-cn / zh-tw / zh-hk，
-# 查询写 lang=zh 时仍会退回拉丁字体，因此补一条通用 zh 的映射并重建缓存。
+# 查询写 lang=zh 时仍会退回拉丁字体，因此补一条通用 zh 的映射并重建缓存；
+# 同时在构建期断言字体真的可用，避免"构建成功但中文仍是方块"这类问题拖到运行期才暴露。
 COPY scripts/fonts-noto-cjk-zh.conf /etc/fonts/conf.d/71-fonts-noto-cjk-zh.conf
-RUN fc-cache -f
+RUN fc-cache -f \
+    && test "$(fc-list :lang=zh | wc -l)" -gt 0 \
+    && fc-match 'sans-serif:lang=zh' | grep -q 'Noto Sans CJK SC'
 
 # Node 走 npmmirror 镜像（国内构建网络下 nodejs.org 常超时），失败再回退官方源。
 RUN curl -fsSL --connect-timeout 10 --max-time 300 \
