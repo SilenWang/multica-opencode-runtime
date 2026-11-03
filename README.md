@@ -83,6 +83,10 @@ docker-compose up -d
 
 优先级：设置了 `NEW_API_TOKEN` 时 **Codex 默认走 New-API**，否则回退 DeepSeek 官方。Reasonix 两个都接入。opencode 默认用 DeepSeek 官方，同时也可选 New-API。
 
+> 网关当前实际可用的模型是 `deepseek-v4-flash` 与 `deepseek-v4.1-flash`。`kimi-k3` 已经写进
+> 各 agent 的模型列表，但 New-API 侧还没有它的渠道，`/v1/models` 不返回、请求报
+> `model_not_found`；先在 New-API 后台建好 kimi-k3 渠道并启用给对应分组即可使用。
+
 ### multica
 
 `pixi global` 安装。容器启动时若设置了 `MULTICA_TOKEN`，自动执行：
@@ -99,13 +103,14 @@ multica daemon start
 启动时写入两份配置：
 
 - `~/.local/share/opencode/auth.json`：写入所有已提供的 provider key（`deepseek`、`newapi`）。
-- `~/.config/opencode/opencode.json`：注册自定义 provider `newapi`（`@ai-sdk/openai-compatible`，`baseURL = $NEW_API_BASE_URL/v1`），并设默认模型 `deepseek/deepseek-v4-flash`。该 provider 下注册了 `deepseek-v4-flash` 与 `deepseek-v4.1-flash`；后者用 `"modalities": { "input": ["text","image"] }` 显式声明图片输入能力（opencode 的图片能力只看 `modalities.input`，`attachment: true` 只会打开 `capabilities.attachment`，不会打开 `capabilities.input.image`，两者实测互不替代）。
+- `~/.config/opencode/opencode.json`：注册自定义 provider `newapi`（`@ai-sdk/openai-compatible`，`baseURL = $NEW_API_BASE_URL/v1`），并设默认模型 `deepseek/deepseek-v4-flash`。该 provider 下注册了 `deepseek-v4-flash`、`deepseek-v4.1-flash` 与 `kimi-k3`；`deepseek-v4.1-flash` 用 `"modalities": { "input": ["text","image"] }` 显式声明图片输入能力（opencode 的图片能力只看 `modalities.input`，`attachment: true` 只会打开 `capabilities.attachment`，不会打开 `capabilities.input.image`，两者实测互不替代）。
 
 默认模型 `deepseek/deepseek-v4-flash` 走 DeepSeek 官方；想用 New-API 网关时：
 
 ```bash
 opencode --model newapi/deepseek-v4-flash
 opencode --model newapi/deepseek-v4.1-flash
+opencode --model newapi/kimi-k3
 ```
 
 或在交互会话里用 `/models` 切换。
@@ -129,7 +134,7 @@ opencode --model newapi/deepseek-v4.1-flash
   wire_api = "responses"
   ```
 
-- `~/.codex/models.json`：模型目录，含 `deepseek-v4-flash` 与 `deepseek-v4.1-flash`（都带 `base_instructions`，兼容 Codex CLI >= 0.144.0）。两个模型都通过 `input_modalities = ["text", "image"]` 显式声明支持图片输入。
+- `~/.codex/models.json`：模型目录，含 `deepseek-v4-flash`、`deepseek-v4.1-flash` 与 `kimi-k3`（都带 `base_instructions`，兼容 Codex CLI >= 0.144.0）。两个 DeepSeek 模型都通过 `input_modalities = ["text", "image"]` 显式声明支持图片输入；`kimi-k3` 目前只声明 `text`（网关侧还没有该模型的渠道，图片能力无法实测）。
 - 项目 `/home/ubuntu` 默认标记为 `trust_level = "trusted"`。
 
 用法：
@@ -137,7 +142,8 @@ opencode --model newapi/deepseek-v4.1-flash
 ```bash
 codex                             # 在任意项目目录直接使用（默认 deepseek-v4-flash）
 codex -m deepseek-v4.1-flash      # 换用网关上的 deepseek-v4.1-flash
-codex -i screenshot.png           # 两个模型都声明了图片输入能力
+codex -m kimi-k3                  # 换用 Kimi K3（需网关已配置该模型渠道）
+codex -i screenshot.png           # deepseek 两个模型都声明了图片输入能力
 ```
 
 New-API 上游会经内置的 CLIProxyAPI 桥接（见下节）；DeepSeek 官方则按需探测后决定是否桥接。
@@ -161,7 +167,7 @@ New-API 上游会经内置的 CLIProxyAPI 桥接（见下节）；DeepSeek 官�
   [[providers]]                # newapi 网关
   name = "newapi"
   base_url = "$NEW_API_BASE_URL/v1"
-  models = ["deepseek-v4-flash", "deepseek-v4.1-flash", "qwen3.8-flash"]
+  models = ["deepseek-v4-flash", "deepseek-v4.1-flash", "qwen3.8-flash", "kimi-k3"]
 
   # 显式声明图片输入能力（new-api 的 /v1/models 不带 input_modalities，
   # 不声明就只会被判为 unknown，图片会走 vision_model/OCR 兜底）
@@ -176,6 +182,7 @@ reasonix                                   # 交互会话
 reasonix run "帮我改个 bug"                # 无界面执行
 reasonix run --model newapi "..."          # 切到 New-API
 reasonix run --model newapi/deepseek-v4.1-flash "..."   # 指定新模型
+reasonix run --model newapi/kimi-k3 "..."                # 指定 Kimi K3（需网关配好渠道）
 reasonix run --model deepseek "..."        # 切到 DeepSeek 官方
 ```
 

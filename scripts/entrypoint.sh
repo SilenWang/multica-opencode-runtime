@@ -84,7 +84,7 @@ api_key_env = "DEEPSEEK_API_KEY"
 name        = "newapi"
 kind        = "openai"
 base_url    = "${NEW_API_BASE_URL:-http://192.168.8.228:3000}/v1"
-models      = ["deepseek-v4-flash", "deepseek-v4.1-flash", "qwen3.8-flash"]
+models      = ["deepseek-v4-flash", "deepseek-v4.1-flash", "qwen3.8-flash", "kimi-k3"]
 api_key_env = "NEW_API_KEY"
 
 # 显式声明 deepseek-v4.1-flash 支持图片输入。new-api 的 /v1/models 不返回
@@ -143,6 +143,9 @@ if [ -n "$NEW_API_TOKEN" ]; then
             "input": ["text", "image"],
             "output": ["text"]
           }
+        },
+        "kimi-k3": {
+          "name": "Kimi K3 (New-API)"
         }
       }
     }
@@ -177,7 +180,7 @@ setup_cliproxyapi() {
         BRIDGE_UPSTREAM="newapi"
         BRIDGE_BASE_URL="${NEW_API_BASE_URL:-http://192.168.8.228:3000}"
         BRIDGE_TOKEN="${NEW_API_TOKEN}"
-        BRIDGE_MODELS_DEFAULT="deepseek-v4-flash,deepseek-v4.1-flash,qwen3.8-flash"
+        BRIDGE_MODELS_DEFAULT="deepseek-v4-flash,deepseek-v4.1-flash,qwen3.8-flash,kimi-k3"
     else
         BRIDGE_UPSTREAM="deepseek"
         BRIDGE_BASE_URL="https://api.deepseek.com"
