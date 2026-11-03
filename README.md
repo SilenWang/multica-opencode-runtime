@@ -83,9 +83,8 @@ docker-compose up -d
 
 优先级：设置了 `NEW_API_TOKEN` 时 **Codex 默认走 New-API**，否则回退 DeepSeek 官方。Reasonix 两个都接入。opencode 默认用 DeepSeek 官方，同时也可选 New-API。
 
-> 网关当前实际可用的模型是 `deepseek-v4-flash` 与 `deepseek-v4.1-flash`。`kimi-k3` 已经写进
-> 各 agent 的模型列表，但 New-API 侧还没有它的渠道，`/v1/models` 不返回、请求报
-> `model_not_found`；先在 New-API 后台建好 kimi-k3 渠道并启用给对应分组即可使用。
+> 网关当前可用 `deepseek-v4-flash`、`deepseek-v4.1-flash` 与 `kimi-k3`（上游为
+> `moonshotai/Kimi-K3`）；`kimi-k3` 的文本与图片输入都已实测可用。
 
 ### multica
 
@@ -134,7 +133,7 @@ opencode --model newapi/kimi-k3
   wire_api = "responses"
   ```
 
-- `~/.codex/models.json`：模型目录，含 `deepseek-v4-flash`、`deepseek-v4.1-flash` 与 `kimi-k3`（都带 `base_instructions`，兼容 Codex CLI >= 0.144.0）。两个 DeepSeek 模型都通过 `input_modalities = ["text", "image"]` 显式声明支持图片输入；`kimi-k3` 目前只声明 `text`（网关侧还没有该模型的渠道，图片能力无法实测）。
+- `~/.codex/models.json`：模型目录，含 `deepseek-v4-flash`、`deepseek-v4.1-flash` 与 `kimi-k3`（都带 `base_instructions`，兼容 Codex CLI >= 0.144.0）。三个模型都通过 `input_modalities = ["text", "image"]` 显式声明支持图片输入（`kimi-k3` 已实测能看图）。
 - 项目 `/home/ubuntu` 默认标记为 `trust_level = "trusted"`。
 
 用法：
@@ -142,7 +141,7 @@ opencode --model newapi/kimi-k3
 ```bash
 codex                             # 在任意项目目录直接使用（默认 deepseek-v4-flash）
 codex -m deepseek-v4.1-flash      # 换用网关上的 deepseek-v4.1-flash
-codex -m kimi-k3                  # 换用 Kimi K3（需网关已配置该模型渠道）
+codex -m kimi-k3                  # 换用 Kimi K3
 codex -i screenshot.png           # deepseek 两个模型都声明了图片输入能力
 ```
 
@@ -182,14 +181,16 @@ reasonix                                   # 交互会话
 reasonix run "帮我改个 bug"                # 无界面执行
 reasonix run --model newapi "..."          # 切到 New-API
 reasonix run --model newapi/deepseek-v4.1-flash "..."   # 指定新模型
-reasonix run --model newapi/kimi-k3 "..."                # 指定 Kimi K3（需网关配好渠道）
+reasonix run --model newapi/kimi-k3 "..."                # 指定 Kimi K3
 reasonix run --model deepseek "..."        # 切到 DeepSeek 官方
 ```
 
 > `model_overrides` 是 Reasonix 的 per-model 能力覆盖，优先级高于它的自动探测
 > （精选预设 / 本地目录 / 在线缓存）。模型 ID 里带 `.`，TOML 点号路径必须写成
 > `[providers.model_overrides."deepseek-v4.1-flash"]`，不加引号会被拆成
-> `deepseek-v4` 与 `1-flash` 两层。详见 Reasonix 的 `docs/MODEL_CAPABILITIES.md`。
+> `deepseek-v4` 与 `1-flash` 两层。新版 reasonix 2.x 也认 provider 级的
+> `vision_models` 字段，模板里两处都写，兼容新旧版本。详见 Reasonix 的
+> `docs/MODEL_CAPABILITIES.md`。
 
 可选：`REASONIX_DEFAULT_MODEL` 覆盖默认模型（默认 `deepseek/deepseek-v4-flash`）。
 

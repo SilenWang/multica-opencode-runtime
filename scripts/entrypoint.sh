@@ -86,13 +86,19 @@ kind        = "openai"
 base_url    = "${NEW_API_BASE_URL:-http://192.168.8.228:3000}/v1"
 models      = ["deepseek-v4-flash", "deepseek-v4.1-flash", "qwen3.8-flash", "kimi-k3"]
 api_key_env = "NEW_API_KEY"
+# Reasonix 2.x 的 provider 级图片能力声明；旧版 reasonix 不认这个字段，
+# 继续用下面的 model_overrides（两处都写，兼容两代）。
+vision_models = ["deepseek-v4.1-flash", "kimi-k3"]
 
-# 显式声明 deepseek-v4.1-flash 支持图片输入。new-api 的 /v1/models 不返回
-# input_modalities，Reasonix 只能把它判为 unknown，图片会走 vision_model/OCR
-# 兜底而不是原生多模态；model_overrides 是 Reasonix 的 per-model 能力覆盖，
-# 优先级高于自动探测与缓存（见 Reasonix docs/MODEL_CAPABILITIES.md）。
+# 显式声明支持图片输入。new-api 的 /v1/models 不返回 input_modalities，
+# Reasonix 只能把模型判为 unknown，图片会走 vision_model/OCR 兜底而不是原生
+# 多模态；model_overrides 是 Reasonix 的 per-model 能力覆盖，优先级高于自动
+# 探测与缓存（见 Reasonix docs/MODEL_CAPABILITIES.md）。
 # 模型 ID 里含 "."，TOML 点号路径必须加引号，否则会被拆成 deepseek-v4 与 1-flash。
 [providers.model_overrides."deepseek-v4.1-flash"]
+vision = true
+
+[providers.model_overrides."kimi-k3"]
 vision = true
 REASONIX_CONFIG
 
@@ -145,7 +151,11 @@ if [ -n "$NEW_API_TOKEN" ]; then
           }
         },
         "kimi-k3": {
-          "name": "Kimi K3 (New-API)"
+          "name": "Kimi K3 (New-API)",
+          "modalities": {
+            "input": ["text", "image"],
+            "output": ["text"]
+          }
         }
       }
     }

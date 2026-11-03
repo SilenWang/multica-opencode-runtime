@@ -144,7 +144,8 @@
       "apply_patch_tool_type": "freeform",
       "web_search_tool_type": "text",
       "input_modalities": [
-        "text"
+        "text",
+        "image"
       ],
       "supports_image_detail_original": false,
       "truncation_policy": {
@@ -165,7 +166,7 @@
       "reasoning_summary_format": "experimental",
       "default_reasoning_summary": "none",
       "display_name": "Kimi-K3",
-      "description": "Kimi K3 via New-API (1M context, text tool use).",
+      "description": "Kimi K3 via New-API (1M context, native image input).",
       "default_reasoning_level": "max",
       "supported_reasoning_levels": [
         {
