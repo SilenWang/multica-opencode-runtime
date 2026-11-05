@@ -106,12 +106,22 @@ USER ubuntu
 WORKDIR /home/ubuntu
 
 # 创建目录否则映射进来会变成root
+#
+# BioMCP（genomoncology/biomcp）单独一条 pixi 命令安装：它是 conda-forge 上的
+# Rust 单文件二进制（MIT，约 18 MB），不依赖 Python，正好补上镜像里没有 Python
+# 运行时的缺口；opencode / multica 走的是私有 channel，两者不能用同一条 -c。
+# entrypoint 会把它注册成 reasonix / codex / opencode 共用的 stdio MCP server，
+# 所以这里只要求 biomcp 在 ~/.pixi/bin（已在下面的 PATH 里），不需要额外包装。
 RUN pixi global install -c https://prefix.dev/sylens opencode multica \
-    && mkdir -p /home/ubuntu/.local/share/opencode
+    && pixi global install -c conda-forge biomcp \
+    && mkdir -p /home/ubuntu/.local/share/opencode \
+    && /home/ubuntu/.pixi/bin/biomcp --version \
+    && rm -rf /home/ubuntu/.cache/rattler
 
 COPY scripts/entrypoint.sh /entrypoint.sh
 COPY scripts/codex-models.json /codex-models.json
 COPY scripts/codex-trust-plugin-hooks.mjs /codex-trust-plugin-hooks.mjs
+COPY scripts/opencode-mcp.mjs /opencode-mcp.mjs
 
 # 只保留 PATH；ponytail 默认级别由 entrypoint 写入 ~/.config/ponytail/config.json
 # （defaultMode=off）。不设全局 PONYTAIL_DEFAULT_MODE，避免覆盖用户在命令行/会话内
