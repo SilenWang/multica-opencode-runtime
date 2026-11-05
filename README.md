@@ -9,6 +9,7 @@
 - [首次配置](#首次配置)
 - [Agent 与 API 接入](#agent-与-api-接入)
 - [插件](#插件)
+- [bio-mcp（生物信息学 MCP）](#bio-mcp生物信息学-mcp)
 - [CLIProxyAPI 桥接](#cliproxyapi-桥接)
 - [浏览器（ego-browser）](#浏览器ego-browser)
 - [数据持久化](#数据持久化)
@@ -31,6 +32,7 @@
 | Codex CLI | 0.154.0 | `npm -g @openai/codex` | |
 | Reasonix | 最新 | `npm -g reasonix` | 容器内 bash 沙箱依赖 `bubblewrap`（见 [Reasonix](#reasonix) 章节） |
 | CLIProxyAPI | 7.2.146 | GitHub Release 固定版本 + SHA256 校验，装到 `/usr/local/bin/cliproxyapi` | Codex 协议转换桥接 |
+| bio-mcp | 0.7.0 | `pixi global install uv python=3.12` + `uv tool install biomcp-server` → `~/.local/bin/bio-mcp` | 生物信息学 MCP（83 个工具），已登记进 opencode 全局配置，见 [bio-mcp](#bio-mcp生物信息学-mcp) |
 | ponytail | v4.9.0 | `git clone --depth 1 --branch v4.9.0` → `/opt/ponytail` | 仅 Codex 的插件，默认关闭 |
 | gh (GitHub CLI) | 2.45.0 | `apt` | 容器启动时检测登录（未登录不阻塞，可手动认证） |
 | docker CLI | 29.1.3 | `apt docker.io` | 配合挂载的宿主机 docker socket |
@@ -242,6 +244,52 @@ codex                                # 默认：off
 会话内可用 ponytail 的 skills：`@ponytail`（ruleset）、`@ponytail-review`、`@ponytail-audit`、`@ponytail-debt`、`@ponytail-gain`、`@ponytail-help`。
 
 > 想在项目内以“指令式”方式使用 ponytail（不装插件），把 `/opt/ponytail/AGENTS.md` 复制到项目根即可。Multica workspace 内由平台注入自己的 `AGENTS.md`，容器不会改动它。
+
+## bio-mcp（生物信息学 MCP）
+
+[qgeng1465/bio-mcp](https://pypi.org/project/biomcp-server/) 提供的生物信息学 MCP 服务（PyPI 包名 `biomcp-server`，命令名 `bio-mcp`）：零配置直连 43 个公开学术数据库（PubMed/NCBI、UniProt、PDB、Ensembl、KEGG、Reactome、GTEx、gnomAD 等），共 **83 个工具**，stdio 传输、不需要任何 API key。
+
+### 镜像里已经做好的事
+
+- 二进制：`~/.local/bin/bio-mcp`（`ENV PATH` 已包含，任何 workdir 直接可执行）。
+- opencode 全局配置：`~/.config/opencode/opencode.json` 的 `mcp.servers.bio-mcp` 已登记。全局配置与 workdir 无关，**新起的 opencode / agent 会话会自动带上这 83 个工具，不需要额外操作**。
+- 启动时保活：`entrypoint.sh` 的 `setup_bio_mcp` 在重写 `opencode.json`（写 provider）之后会重新登记一次，所以 `NEW_API_TOKEN` 之类的启动配置不会把 MCP 段冲掉。
+
+> 安装方式说明：`pixi global` 不支持 pypi 依赖（0.76.1 / 0.84.1 都没有 `--pypi`，manifest 写 `pypi-dependencies` 报 `Unexpected keys`），所以这里是 **pixi 管 uv、uv 管 pypi**：`pixi global install uv python=3.12` 后由 `uv tool install biomcp-server` 装包。不要改用 `pixi global install biomcp-server`（conda-forge 无此包），也不要用 `astral.sh/uv/install.sh`（本机 TLS 失败）。
+
+### 验证
+
+```bash
+# 列出 MCP 服务器与连接状态（应为 ✓ bio-mcp connected）
+opencode mcp list
+
+# 直接对二进制做一次 MCP 握手（不进 agent）
+printf '%s\n' \
+  '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"probe","version":"0"}}}' \
+  '{"jsonrpc":"2.0","method":"notifications/initialized","params":{}}' \
+  '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}' \
+  | bio-mcp
+```
+
+### 注意事项
+
+- **必须能出网**：bio-mcp 本身无状态、不落盘，但每次调用都要访问公共数据库。实测（本机网络）`db_health_check` 约 **38/43** 可达，其中 STRING-db / KEGG / OpenAlex / Ensembl Plants 为 ConnectError、Europe PMC 偶发 503，属网络限制而非工具故障。走代理/白名单时至少放行 `*.ncbi.nlm.nih.gov`、`*.ebi.ac.uk`、`*.uniprot.org`、`*.ensembl.org`、`data.rcsb.org`。
+- **NCBI 限速写死 3 秒/次**（源码 `NCBI_RATE_LIMIT_SECONDS`，且不支持 `NCBI_API_KEY`），PubMed/BLAST 批量检索天然偏慢；唯一的可选 key 是 `BIOGRID_ACCESS_KEY`（只影响 biogrid 两个工具）。
+- **工具面开销**：`tools/list` 的 schema 约 46–70 KB（≈ 1.2–1.5 万 token），会话固定成本，注意上下文预算。
+- **按 agent 授权**（可选）：镜像内置的是全局默认。若想只给某些 agent 或再加别的 MCP，仍走 Multica 的库 + 绑定：
+
+  ```bash
+  printf '{"command":"/home/ubuntu/.local/bin/bio-mcp"}' | multica workspace mcp add bio-mcp --server-config-stdin
+  multica workspace mcp list --output table        # 取 server id
+  multica agent mcp add <agent-id> <server-id>
+  ```
+
+  这两条是**叠加**关系：agent 的 `mcp_config` 通过 `OPENCODE_CONFIG_CONTENT` 下发，与全局 `opencode.json` 是两份 config document，同名以 agent 侧为准。
+- **许可证**：MIT（学术用途），商业用途需单独授权。
+
+### 容器重建后
+
+镜像已内置，重建后不需要重装：新容器起来后 `bio-mcp` 就在 `PATH` 里、opencode 全局配置里也已登记。想确认就跑一次 `opencode mcp list`（看到 `✓ bio-mcp connected` 即可）。
 
 ## CLIProxyAPI 桥接
 

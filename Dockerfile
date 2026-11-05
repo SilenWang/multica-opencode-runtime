@@ -119,6 +119,42 @@ COPY scripts/codex-trust-plugin-hooks.mjs /codex-trust-plugin-hooks.mjs
 ENV PATH="/home/ubuntu/.local/bin:/home/ubuntu/.pixi/bin:${PATH}"
 
 # ---------------------------------------------------------------------------
+# bio-mcp（生物信息学 MCP，PyPI 包 biomcp-server）
+# ---------------------------------------------------------------------------
+# 为什么不用 `pixi global install biomcp-server`：conda-forge 没有这个包（它是 PyPI
+# 包），而 pixi global 不接受 pypi 依赖 —— 0.76.1 与 0.84.1 的 `pixi global install`
+# 都没有 `--pypi`，手写 [envs.x.pypi-dependencies] 报 Unexpected keys，
+# 0.8x 新增的 `--path/--build-backend` 只把项目自身打成 conda 包、不解析 pyproject
+# 里的依赖（启动报 ModuleNotFoundError: mcp）。这是 pixi 的能力边界，升级基础镜像
+# 解决不了。
+# 因此改用等价的「pixi 管 uv、uv 管 pypi」写法：Python 与 uv 都由 conda-forge 提供
+# （环境仍归 pixi 管），PyPI 包交给 uv tool 装。不要用 astral.sh/uv/install.sh 的
+# 一键脚本 —— 这类构建机对它 TLS 失败（curl exit 35）。
+# UV_PYTHON_DOWNLOADS=never + 显式 --python 是双保险：否则 uv 会去 GitHub 下载
+# python-build-standalone，同一条网络限制下必然失败。
+# 产物 ~/.local/bin/bio-mcp（上面的 ENV PATH 已包含该目录），任何 workdir 直接可用。
+ARG BIOMCP_VERSION=0.7.0
+RUN pixi global install uv python=3.12 \
+    && UV_PYTHON_DOWNLOADS=never UV_TOOL_BIN_DIR=/home/ubuntu/.local/bin \
+        /home/ubuntu/.pixi/bin/uv tool install \
+            --python /home/ubuntu/.pixi/envs/python/bin/python \
+            "biomcp-server==${BIOMCP_VERSION}" \
+    && test -x /home/ubuntu/.local/bin/bio-mcp \
+    && rm -rf /home/ubuntu/.cache/rattler /home/ubuntu/.cache/uv
+
+# 通用 MCP 预置：把 bio-mcp 写进 opencode 的**全局**配置
+# （~/.config/opencode/opencode.json 的 mcp.servers 段）。全局配置与 workdir 无关，
+# 任何目录下启动的 opencode / Multica agent 会话都会加载，无需额外操作。
+# 用 opencode 自己的 `mcp add --global` 而不是手写 JSON：schema 随版本变（2.x 是
+# mcp.servers，1.x 是 mcp.<name>），手写会在换版本时静默失效。
+# 注：entrypoint.sh 在设置了 NEW_API_TOKEN 时会整体重写这个文件（写入 provider），
+# 所以那边也会重新登记一次（见 setup_bio_mcp）；两份不是重复，是"镜像内置 + 启动时
+# 保住"。按 agent 授权的 `multica agent mcp add` 仍然保留，两者叠加而不是互斥
+# （agent 的 mcp_config 走 OPENCODE_CONFIG_CONTENT，与全局文件是两份 document）。
+RUN opencode mcp add --global bio-mcp -- /home/ubuntu/.local/bin/bio-mcp \
+    && grep -q '"bio-mcp"' /home/ubuntu/.config/opencode/opencode.json
+
+# ---------------------------------------------------------------------------
 # 可选：浏览器上网能力（ego-browser / ego-lite-linux + Google Chrome，headed + Xvfb）
 # ---------------------------------------------------------------------------
 # 说明：上游 citrolabs/ego-lite 官方只发 macOS DMG；这里用社区 Linux host

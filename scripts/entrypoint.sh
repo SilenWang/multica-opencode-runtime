@@ -164,6 +164,30 @@ if [ -n "$NEW_API_TOKEN" ]; then
 OPENCODE_JSON
 fi
 
+# 3.1 bio-mcp（生物信息学 MCP）：镜像里已装好 ~/.local/bin/bio-mcp，并在构建时把
+# 它写进了 opencode 全局配置。但上面写 opencode.json 时是整体覆盖（只写 provider），
+# 会把构建期那份 mcp.servers 一起冲掉，所以这里再登记一次。
+# `opencode mcp add --global` 是幂等的：已存在则原样保留，不重复追加。
+# 用 CLI 而不是手写 JSON，是因为 mcp 段的 schema 随 opencode 版本变化
+# （2.x 是 mcp.servers，1.x 是 mcp.<name>）。
+# 失败只告警：bio-mcp 缺失不应该让容器起不来（entrypoint 顶部是 set -e）。
+setup_bio_mcp() {
+    local bin="/home/ubuntu/.local/bin/bio-mcp"
+    if [ ! -x "$bin" ]; then
+        echo "WARNING: ${bin} 不存在，跳过 MCP 登记（镜像可能未按预期构建）。"
+        return 0
+    fi
+    if opencode mcp add --global bio-mcp -- "$bin" > /dev/null 2>&1; then
+        echo "opencode: bio-mcp MCP 已登记（全局配置，任何 workdir 可用）。"
+    else
+        echo "WARNING: 登记 bio-mcp 到 opencode 全局配置失败；可手动执行"
+        echo "         opencode mcp add --global bio-mcp -- ${bin}"
+    fi
+    return 0
+}
+
+setup_bio_mcp
+
 # 3.5 CLIProxyAPI：Codex 的 responses → 上游 chat/completions 协议转换网关
 #
 # Codex CLI 只会说 OpenAI 的 `responses` 协议，而 new-api 网关只提供
