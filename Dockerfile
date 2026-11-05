@@ -109,9 +109,23 @@ WORKDIR /home/ubuntu
 RUN pixi global install -c https://prefix.dev/sylens opencode multica \
     && mkdir -p /home/ubuntu/.local/share/opencode
 
+# BioMCP（genomoncology/biomcp）：用官方安装脚本装 Rust 单文件二进制。
+# 脚本自带架构检测与 SHA256 校验，落在 ~/.local/bin（下面的 ENV PATH 已包含），
+# 不依赖 Python——正好补上基础镜像没有 Python 运行时的缺口。
+#
+# 版本必须固定：install.sh 的 latest 分支要实时解析 GitHub release，构建不可复现。
+# 升级时改 BIOMCP_VERSION。先下载再执行（而不是 curl | bash），让下载失败能在
+# 构建日志里明确报错，而不是把空脚本喂给 bash。
+ARG BIOMCP_VERSION=0.8.25
+RUN curl -fsSL https://biomcp.org/install.sh -o /tmp/biomcp-install.sh \
+    && bash /tmp/biomcp-install.sh --version "${BIOMCP_VERSION}" \
+    && rm -f /tmp/biomcp-install.sh \
+    && /home/ubuntu/.local/bin/biomcp --version
+
 COPY scripts/entrypoint.sh /entrypoint.sh
 COPY scripts/codex-models.json /codex-models.json
 COPY scripts/codex-trust-plugin-hooks.mjs /codex-trust-plugin-hooks.mjs
+COPY scripts/opencode-mcp.mjs /opencode-mcp.mjs
 
 # 只保留 PATH；ponytail 默认级别由 entrypoint 写入 ~/.config/ponytail/config.json
 # （defaultMode=off）。不设全局 PONYTAIL_DEFAULT_MODE，避免覆盖用户在命令行/会话内
