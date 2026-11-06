@@ -447,6 +447,53 @@ setup_ponytail() {
 
 setup_ponytail
 
+# 9. BioMCP：把镜像里预装的 biomcp 注册成三个 agent 共用的 stdio MCP server
+#
+# biomcp 由 Dockerfile 用官方 install.sh 装到 ~/.local/bin（已在 PATH），
+# 这里只做"注册"，不复制二进制；注册信息写进各 CLI 自己的全局配置，所以
+# reasonix / codex / opencode 谁被 Multica 选中都能用。
+#
+# 必须放在 setup_reasonix / setup_codex_official 之后：那两个函数会整份重写
+# config.toml，先注册会被覆盖。失败只告警，不影响容器启动。
+setup_biomcp_mcp() {
+    if ! command -v biomcp >/dev/null 2>&1; then
+        echo "WARNING: biomcp not found (pixi global install failed?); MCP registration skipped."
+        return 0
+    fi
+
+    # Codex：写入 ~/.codex/config.toml 的 [mcp_servers.biomcp]
+    if command -v codex >/dev/null 2>&1; then
+        mkdir -p /home/ubuntu/.codex
+        # 先删后建：容器重启时覆盖旧条目，避免同名残留导致 add 失败
+        codex mcp remove biomcp >/dev/null 2>&1 || true
+        if codex mcp add biomcp -- biomcp serve >/dev/null 2>&1; then
+            echo "Codex: biomcp MCP registered (stdio: biomcp serve)."
+        else
+            echo "WARNING: Codex biomcp MCP registration failed."
+        fi
+    fi
+
+    # Reasonix：写入 ~/.reasonix/config.toml（全局层）
+    if command -v reasonix >/dev/null 2>&1; then
+        mkdir -p /home/ubuntu/.reasonix
+        reasonix mcp remove biomcp >/dev/null 2>&1 || true
+        if reasonix mcp add biomcp -- biomcp serve >/dev/null 2>&1; then
+            echo "Reasonix: biomcp MCP registered (stdio: biomcp serve)."
+        else
+            echo "WARNING: Reasonix biomcp MCP registration failed."
+        fi
+    fi
+
+    # opencode：读-改-写 ~/.config/opencode/opencode.json 的 mcp 段（保留 provider）
+    if node /opencode-mcp.mjs >/dev/null 2>&1; then
+        echo "opencode: biomcp MCP registered (stdio: biomcp serve)."
+    else
+        echo "WARNING: opencode biomcp MCP registration failed."
+    fi
+}
+
+setup_biomcp_mcp
+
 # 1.5 虚拟显示：headed Chrome 需要 DISPLAY（失败不影响容器启动，可降级为无头）
 setup_xvfb
 
