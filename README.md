@@ -1,6 +1,6 @@
 # multica-opencode-runtime
 
-一个开箱即用的 Multica Runtime 容器：预装 [multica](https://multica.ai/docs)、[opencode](https://opencode.ai)、Codex CLI、Reasonix 等 agent，并内置 New-API / DeepSeek 的接入与协议转换。构建后填入 `.env` 即可启动一个可用的运行时容器。
+一个开箱即用的 Multica Runtime 容器：预装 [multica](https://multica.ai/docs)、[opencode](https://opencode.ai)、Codex CLI、Reasonix 等 agent，并内置 New-API / DeepSeek 的接入。构建后填入 `.env` 即可启动一个可用的运行时容器。
 
 ## 目录
 
@@ -9,7 +9,6 @@
 - [首次配置](#首次配置)
 - [Agent 与 API 接入](#agent-与-api-接入)
 - [插件](#插件)
-- [CLIProxyAPI 桥接](#cliproxyapi-桥接)
 - [浏览器（ego-browser）](#浏览器ego-browser)
 - [数据持久化](#数据持久化)
 - [容器内使用 Docker](#容器内使用-docker)
@@ -30,7 +29,6 @@
 | opencode | 1.18.30 | `pixi global`（同上 channel） | |
 | Codex CLI | 0.154.0 | `npm -g @openai/codex` | |
 | Reasonix | 最新 | `npm -g reasonix` | 容器内 bash 沙箱依赖 `bubblewrap`（见 [Reasonix](#reasonix) 章节） |
-| CLIProxyAPI | 7.2.146 | GitHub Release 固定版本 + SHA256 校验，装到 `/usr/local/bin/cliproxyapi` | Codex 协议转换桥接 |
 | gt (Gitea CLI) | 2.0.0 | dl.gitea.com 固定版本 + SHA256 校验，装到 `/usr/local/bin/gt` | Gitea 官方新一代命令行工具（取代 tea）；未预置登录，用 `gt auth login` 认证 |
 | ponytail | v4.9.0 | `git clone --depth 1 --branch v4.9.0` → `/opt/ponytail` | 仅 Codex 的插件，默认关闭 |
 | gh (GitHub CLI) | 2.45.0 | `apt` | 容器启动时检测登录（未登录不阻塞，可手动认证） |
@@ -83,7 +81,7 @@ docker-compose up -d
 | DeepSeek 官方 | `https://api.deepseek.com` | `DEEPSEEK_TOKEN` |
 | New-API 网关 | `NEW_API_BASE_URL`（默认 `http://192.168.8.228:3000`） | `NEW_API_TOKEN` |
 
-优先级：设置了 `NEW_API_TOKEN` 时 **Codex 默认走 New-API**，否则回退 DeepSeek 官方。Reasonix 两个都接入。opencode 默认用 DeepSeek 官方，同时也可选 New-API。
+Codex 固定走 **New-API**（直接使用其 `responses` 接口，容器内不再做协议转换）；未设置 `NEW_API_TOKEN` 时跳过 Codex 配置。Reasonix 两个都接入，opencode 默认用 DeepSeek 官方、同时也可选 New-API。
 
 > 网关当前可用 `deepseek-v4-flash`、`deepseek-v4.1-flash` 与 `kimi-k3`（上游为
 > `moonshotai/Kimi-K3`）；`kimi-k3` 的文本与图片输入都已实测可用。
@@ -124,14 +122,14 @@ opencode --model newapi/kimi-k3
 
   ```toml
   model = "deepseek-v4-flash"
-  model_provider = "newapi"          # 无 NEW_API_TOKEN 时为 deepseek
+  model_provider = "newapi"
   preferred_auth_method = "apikey"
   forced_login_method = "api"
   model_reasoning_effort = "high"
   model_catalog_json = "~/.codex/models.json"
   web_search = "disabled"            # 网关只接受 function 工具
   [model_providers.newapi]
-  base_url = "http://127.0.0.1:8317/v1"   # 桥接就绪时；否则上游直连地址
+  base_url = "http://192.168.8.228:3000/v1"   # $NEW_API_BASE_URL 自动补 /v1
   wire_api = "responses"
   ```
 
@@ -147,7 +145,7 @@ codex -m kimi-k3                  # 换用 Kimi K3
 codex -i screenshot.png           # deepseek 两个模型都声明了图片输入能力
 ```
 
-New-API 上游会经内置的 CLIProxyAPI 桥接（见下节）；DeepSeek 官方则按需探测后决定是否桥接。
+Codex 直连 New-API 的 `/v1/responses`，中间不再有本地协议转换进程。Codex 只支持 `responses` 协议，所以未配置 `NEW_API_TOKEN` 时不会生成 Codex 配置；DeepSeek 官方（只有 `chat/completions`）仍可供 Reasonix / opencode 使用。
 
 ### Reasonix
 
@@ -244,34 +242,6 @@ codex                                # 默认：off
 会话内可用 ponytail 的 skills：`@ponytail`（ruleset）、`@ponytail-review`、`@ponytail-audit`、`@ponytail-debt`、`@ponytail-gain`、`@ponytail-help`。
 
 > 想在项目内以“指令式”方式使用 ponytail（不装插件），把 `/opt/ponytail/AGENTS.md` 复制到项目根即可。Multica workspace 内由平台注入自己的 `AGENTS.md`，容器不会改动它。
-
-## CLIProxyAPI 桥接
-
-Codex CLI 只会说 OpenAI 的 `responses` 协议，而 new-api 网关的 `responses` 支持不完整——非流式探测可能返回 200，但 Codex 实际使用的流式请求会中途断开（`stream closed before response.completed`）。镜像内置 [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI) 做协议转换：
-
-```
-codex ──responses──> 127.0.0.1:8317 (CLIProxyAPI) ──chat/completions──> new-api
-```
-
-容器启动时 `setup_cliproxyapi` 会：
-
-1. 决定是否插入桥接：上游为 new-api 时始终启用（不做 200 跳过判断，避免非流式探测误判）；其它上游探测 `POST /v1/responses`，404/405/501/400 明确不支持时启用，其余保持直连；
-2. 生成 `~/.cli-proxy-api/config.yaml`（只绑 `127.0.0.1`，上游配在 `openai-compatibility` 下），拉起 `cliproxyapi` 并等 `/v1/models` 就绪（30s 超时，失败则回退直连）；
-3. 把 `~/.codex/config.toml` 的 `base_url` 指到 `http://127.0.0.1:8317/v1`，`experimental_bearer_token` 换成桥接自身的 key。
-
-生成的 `config.yaml` 里固定写入 `disable-cooling: true`。桥接只有一条上游凭据，而 CLIProxyAPI 默认会对上游失败做凭据/模型冷却：一次瞬时失败（5xx/超时/断流）就把唯一凭据置入冷却（默认 60s，401/403 为 30m，404 为 12h），冷却期内所有请求直接返回 `503 auth_unavailable: no auth available`。单凭据场景下没有可切换的备用凭据，冷却只是把上游抖动放大成整段黑屏（表现为“用一段时间就 503”）。关闭冷却后，真实的上游错误会直接透传，由 Codex 与 `request-retry` 重试。
-
-相关环境变量（均有默认值，通常无需设置）：
-
-| 变量 | 默认 | 说明 |
-| --- | --- | --- |
-| `CLIPROXY_BRIDGE` | `auto` | `auto` 按上游类型启用（new-api 始终启用，其它上游探测后决定）/ `on` 强制启用 / `off` 禁用 |
-| `CLIPROXY_PORT` | `8317` | 桥接监听端口（仅 127.0.0.1） |
-| `CLIPROXY_HOME` | `/home/ubuntu/.cli-proxy-api` | 配置、auth 目录、日志、pid 所在位置 |
-| `CLIPROXY_API_KEY` | 自动生成 | 桥接访问 key，自动生成后持久化在 `$CLIPROXY_HOME/api_key` |
-| `CLIPROXY_MODELS` | 跟随上游 | 模型映射 `上游模型名:Codex侧名字`，逗号分隔，省略 `:别名` 时两边同名 |
-
-排查：`tail -f ~/.cli-proxy-api/logs/cliproxyapi.log`，或 `curl -s http://127.0.0.1:8317/v1/models -H "Authorization: Bearer $(cat ~/.cli-proxy-api/api_key)"`。
 
 ## 浏览器（ego-browser）
 
