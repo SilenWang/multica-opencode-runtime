@@ -63,6 +63,32 @@ ARG PONYTAIL_VERSION=v4.9.0
 RUN git clone --depth 1 --branch ${PONYTAIL_VERSION} \
         https://github.com/DietrichGebert/ponytail.git /opt/ponytail
 
+# Gitea CLI（gt）：Gitea 官方新一代命令行工具（tea 已停止维护，gt 1.0 起取代它）。
+# 官方安装脚本会实时解析 latest release 再下载，构建不可复现；这里按发布物固定
+# 版本 + SHA256 校验安装，并支持 amd64 / arm64 双架构。
+# 升级时 GT_VERSION 与下面两个 checksum 必须一起改（取自同版本 .xz.sha256）。
+ARG GT_VERSION=2.0.0
+RUN set -eux; \
+    case "$(dpkg --print-architecture)" in \
+        amd64) \
+            asset="linux-amd64"; \
+            sha="6fc39a36d9d326ad1f2fbd08cf07f317fce8e16a9355422b104aade14b25c8e6" ;; \
+        arm64) \
+            asset="linux-arm64"; \
+            sha="becd84f74bf15ca7da6aa423418575c48f17f444f3a696d2c325ebd372a27e5b" ;; \
+        *) \
+            echo "gt: unsupported architecture $(dpkg --print-architecture)" >&2; \
+            exit 1 ;; \
+    esac; \
+    curl -fsSL --connect-timeout 10 --max-time 300 \
+        "https://dl.gitea.com/gitea-cli/${GT_VERSION}/gitea-cli-${GT_VERSION}-${asset}.xz" \
+        -o /tmp/gt.xz; \
+    echo "${sha}  /tmp/gt.xz" | sha256sum -c -; \
+    xz -dc /tmp/gt.xz > /usr/local/bin/gt; \
+    chmod 0755 /usr/local/bin/gt; \
+    rm -f /tmp/gt.xz; \
+    gt --version
+
 # 给unubtu sudo权限，方便后续agent可能要自己安装一些工具
 RUN echo "ubuntu ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/ubuntu \
     && chmod 0440 /etc/sudoers.d/ubuntu
