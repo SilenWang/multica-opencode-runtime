@@ -67,6 +67,10 @@ docker-compose up -d
 
 - multica 使用 token 登录：`MULTICA_TOKEN` 与运行时编码绑定，手动生成并保存有助于恢复运行时容器。
 - GitHub 未登录不会影响容器启动：容器会正常保持运行。进入容器后执行 `BROWSER=false gh auth login` 完成认证（或在 `.env` 里设置 `GH_TOKEN` / `GITHUB_TOKEN`，启动时自动登录）。认证后权限与 GitHub 网页端一致，无需额外配置私有仓库/组织权限。
+  - 推荐用 **PAT**（`GH_TOKEN`，classic scopes：`repo, read:org, gist, workflow`）。容器启动时会把它写进 `~/.config/gh/hosts.yml` 并执行 `gh auth setup-git`，因为只放在 env 里不够：
+    - Codex 的每任务 `codex-home/config.toml` 带一段 multica-managed `[shell_environment_policy]`，其 `include_only` 白名单不含 `GH_TOKEN`/`GITHUB_TOKEN`，Codex 的 shell 里 `gh` 会完全没凭据（报 `To get started with GitHub CLI`）；
+    - `git` 不读 `GH_TOKEN`，没有 credential helper 时 `git push` 报 `could not read Username for github.com`。
+    - `hosts.yml` 是文件，不受 agent shell 的 env 白名单影响，`gh` 和 `git`（经 helper）都能用。
   - 为什么要带 `BROWSER=false`：镜像里预装了 headed Chrome + Xvfb，`gh` 检测到浏览器可打开时会尝试自己拉起浏览器，设备验证码看不到（日志里也刷不出来）。关掉浏览器后 `gh` 会把 one-time code 直接打印在终端里，按提示粘贴到 `https://github.com/login/device` 即可。
 - Gitea 同理：`gt` 已预装（`gt --version`），但没有任何站点凭证。进入容器后执行 `gt auth login --host https://your.gitea.example --token <token>`（凭证写入 `~/.config/gt/config.yaml`）即可使用 `gt repo list`、`gt issue list`、`gt pr create` 等命令。
 
@@ -102,12 +106,12 @@ multica daemon start
 启动时写入两份配置：
 
 - `~/.local/share/opencode/auth.json`：写入所有已提供的 provider key（`deepseek`、`newapi`）。
-- `~/.config/opencode/opencode.json`：注册自定义 provider `newapi`（`@ai-sdk/openai-compatible`，`baseURL = $NEW_API_BASE_URL/v1`），并设默认模型 `deepseek/deepseek-v4-flash`。该 provider 下注册了 `deepseek-v4-flash`、`deepseek-v4.1-flash` 与 `kimi-k3`；`deepseek-v4.1-flash` 用 `"modalities": { "input": ["text","image"] }` 显式声明图片输入能力（opencode 的图片能力只看 `modalities.input`，`attachment: true` 只会打开 `capabilities.attachment`，不会打开 `capabilities.input.image`，两者实测互不替代）。
+- `~/.config/opencode/opencode.json`：注册自定义 provider `newapi`（`@ai-sdk/openai-compatible`，`baseURL = $NEW_API_BASE_URL/v1`），并设默认模型 `newapi/deepseek-v4-flash`（New-API 网关下的 deepseek）。该 provider 下注册了 `deepseek-v4-flash`、`deepseek-v4.1-flash` 与 `kimi-k3`；`deepseek-v4.1-flash` 用 `"modalities": { "input": ["text","image"] }` 显式声明图片输入能力（opencode 的图片能力只看 `modalities.input`，`attachment: true` 只会打开 `capabilities.attachment`，不会打开 `capabilities.input.image`，两者实测互不替代）。
 
-默认模型 `deepseek/deepseek-v4-flash` 走 DeepSeek 官方；想用 New-API 网关时：
+默认模型 `newapi/deepseek-v4-flash` 走 New-API 网关；想切回 DeepSeek 官方时：
 
 ```bash
-opencode --model newapi/deepseek-v4-flash
+opencode --model deepseek/deepseek-v4-flash
 opencode --model newapi/deepseek-v4.1-flash
 opencode --model newapi/kimi-k3
 ```
@@ -155,7 +159,7 @@ Codex 直连 New-API 的 `/v1/responses`，中间不再有本地协议转换进�
 - `~/.reasonix/config.toml`：
 
   ```toml
-  default_model = "deepseek/deepseek-v4-flash"
+  default_model = "newapi/deepseek-v4-flash"
   language = "zh"
 
   [[providers]]                # deepseek 官方
@@ -192,7 +196,7 @@ reasonix run --model deepseek "..."        # 切到 DeepSeek 官方
 > `vision_models` 字段，模板里两处都写，兼容新旧版本。详见 Reasonix 的
 > `docs/MODEL_CAPABILITIES.md`。
 
-可选：`REASONIX_DEFAULT_MODEL` 覆盖默认模型（默认 `deepseek/deepseek-v4-flash`）。
+可选：`REASONIX_DEFAULT_MODEL` 覆盖默认模型（有 `NEW_API_TOKEN` 时默认 `newapi/deepseek-v4-flash`，否则回退 `deepseek/deepseek-v4-flash`）。
 
 > **bash 沙箱（已启用）**：Reasonix **1.38.8 起权限 preset（read-only / workspace-write）
 > 接管 bash 沙箱**，ACP 新会话的 preset 是 `workspace-write`，reasonix 会用
