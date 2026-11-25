@@ -526,19 +526,43 @@ setup_github() {
         return 0
     fi
 
-    if gh auth status --hostname github.com > /dev/null 2>&1; then
-        echo "GitHub CLI 已登录，跳过。"
-        return 0
-    fi
-
-    # 可选：通过 GH_TOKEN / GITHUB_TOKEN 做非交互式登录（便于无人值守）
+    # 必须提供 token 时"每次启动都落地到 hosts.yml"，不能因为 env 里能用就跳过：
+    #
+    # 1) gh 只在"进程 env 里确实带着 GH_TOKEN"时才用它。Multica 为 Codex 生成的
+    #    每任务 codex-home/config.toml 会写一段 multica-managed
+    #    [shell_environment_policy]，include_only 是一份固定白名单，里面没有
+    #    GH_TOKEN / GITHUB_TOKEN。于是 Codex 的 shell 里 gh 完全看不到凭据，报
+    #    "To get started with GitHub CLI, please run: gh auth login"。
+    #    hosts.yml 是文件，不受 env 白名单过滤影响，任何 agent 都能读到。
+    # 2) git 不读 GH_TOKEN，只认 credential helper。以前跳过 gh auth login 时
+    #    从没执行过 gh auth setup-git，~/.gitconfig 里没有 helper，也没有
+    #    hosts.yml，`git push` 直接报 "could not read Username for github.com"，
+    #    agent 无法推分支/建 PR（Codex、Reasonix、opencode 都一样）。
+    #
+    # 所以：只要给了 token，就无条件写入 hosts.yml 并配置 git credential helper；
+    # 没给 token 且已登录（例如容器内手动 gh auth login 后重启）才跳过。
     local gh_token="${GH_TOKEN:-${GITHUB_TOKEN:-}}"
     if [ -n "${gh_token}" ]; then
-        if printf '%s\n' "${gh_token}" | gh auth login --hostname github.com --with-token > /dev/null 2>&1; then
-            echo "GitHub CLI 已通过 GH_TOKEN/GITHUB_TOKEN 登录。"
+        mkdir -p /home/ubuntu/.config/gh
+        # gh 在 GH_TOKEN 存在时拒绝把 token 写进 hosts.yml（会打印
+        # "The value of the GH_TOKEN environment variable is being used for
+        # authentication"），因此子进程里先清掉再登录。
+        if printf '%s\n' "${gh_token}" | env -u GH_TOKEN -u GITHUB_TOKEN \
+                gh auth login --hostname github.com --with-token > /dev/null 2>&1; then
+            chmod 600 /home/ubuntu/.config/gh/hosts.yml 2> /dev/null || true
+            # 让 git 通过 `gh auth git-credential` 取 hosts.yml 里的 token
+            gh auth setup-git > /dev/null 2>&1 || true
+            echo "GitHub CLI 已通过 GH_TOKEN/GITHUB_TOKEN 登录（已写入 hosts.yml 并配置 git credential helper）。"
         else
             echo "WARNING: GitHub token 登录失败；容器继续运行，可稍后手动执行 'BROWSER=false gh auth login'。"
         fi
+        return 0
+    fi
+
+    if gh auth status --hostname github.com > /dev/null 2>&1; then
+        echo "GitHub CLI 已登录，跳过。"
+        # 兜底：历史上手动登录过但没有 git helper 的容器，重启时补一次
+        gh auth setup-git > /dev/null 2>&1 || true
         return 0
     fi
 

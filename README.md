@@ -68,6 +68,10 @@ docker-compose up -d
 
 - multica 使用 token 登录：`MULTICA_TOKEN` 与运行时编码绑定，手动生成并保存有助于恢复运行时容器。
 - GitHub 未登录不会影响容器启动：容器会正常保持运行。进入容器后执行 `BROWSER=false gh auth login` 完成认证（或在 `.env` 里设置 `GH_TOKEN` / `GITHUB_TOKEN`，启动时自动登录）。认证后权限与 GitHub 网页端一致，无需额外配置私有仓库/组织权限。
+  - 推荐用 **PAT**（`GH_TOKEN`，classic scopes：`repo, read:org, gist, workflow`）。容器启动时会把它写进 `~/.config/gh/hosts.yml` 并执行 `gh auth setup-git`，因为只放在 env 里不够：
+    - Codex 的每任务 `codex-home/config.toml` 带一段 multica-managed `[shell_environment_policy]`，其 `include_only` 白名单不含 `GH_TOKEN`/`GITHUB_TOKEN`，Codex 的 shell 里 `gh` 会完全没凭据（报 `To get started with GitHub CLI`）；
+    - `git` 不读 `GH_TOKEN`，没有 credential helper 时 `git push` 报 `could not read Username for github.com`。
+    - `hosts.yml` 是文件，不受 agent shell 的 env 白名单影响，`gh` 和 `git`（经 helper）都能用。
   - 为什么要带 `BROWSER=false`：镜像里预装了 headed Chrome + Xvfb，`gh` 检测到浏览器可打开时会尝试自己拉起浏览器，设备验证码看不到（日志里也刷不出来）。关掉浏览器后 `gh` 会把 one-time code 直接打印在终端里，按提示粘贴到 `https://github.com/login/device` 即可。
 
 ## Agent 与 API 接入
