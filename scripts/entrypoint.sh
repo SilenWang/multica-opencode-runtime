@@ -55,6 +55,17 @@ setup_reasonix() {
     echo "Configuring Reasonix (DeepSeek official + New-API)..."
     mkdir -p /home/ubuntu/.reasonix
 
+    # 默认模型：有 NEW_API_TOKEN 时用 New-API 网关下的 deepseek，否则回退 DeepSeek
+    # 官方。这样默认链路不依赖 DEEPSEEK_TOKEN 是否有效（它对官方直连是硬依赖）。
+    local reasonix_default_model="${REASONIX_DEFAULT_MODEL:-}"
+    if [ -z "${reasonix_default_model}" ]; then
+        if [ -n "${NEW_API_TOKEN:-}" ]; then
+            reasonix_default_model="newapi/deepseek-v4-flash"
+        else
+            reasonix_default_model="deepseek/deepseek-v4-flash"
+        fi
+    fi
+
     # 全局密钥文件 <Reasonix home>/.env，provider 通过 api_key_env 引用
     cat > /home/ubuntu/.reasonix/.env << REASONIX_ENV
 DEEPSEEK_API_KEY=${DEEPSEEK_TOKEN}
@@ -64,7 +75,7 @@ REASONIX_ENV
     # 用户级 config.toml（~/.reasonix/config.toml），接入 DeepSeek 官方 + New-API
     cat > /home/ubuntu/.reasonix/config.toml << REASONIX_CONFIG
 config_version = 1
-default_model = "${REASONIX_DEFAULT_MODEL:-deepseek/deepseek-v4-flash}"
+default_model = "${reasonix_default_model}"
 language = "zh"
 
 # 不再覆盖 [sandbox]：容器已是隔离边界，容器内 reasonix 无需再套沙箱。reasonix
@@ -103,7 +114,7 @@ vision = true
 REASONIX_CONFIG
 
     chmod 600 /home/ubuntu/.reasonix/.env /home/ubuntu/.reasonix/config.toml 2>/dev/null || true
-    echo "Reasonix integration ready (providers: deepseek + newapi, default_model: ${REASONIX_DEFAULT_MODEL:-deepseek/deepseek-v4-flash})."
+    echo "Reasonix integration ready (providers: deepseek + newapi, default_model: ${reasonix_default_model})."
 }
 
 setup_reasonix
@@ -130,7 +141,7 @@ if [ -n "$NEW_API_TOKEN" ]; then
     cat > /home/ubuntu/.config/opencode/opencode.json <<OPENCODE_JSON
 {
   "\$schema": "https://opencode.ai/config.json",
-  "model": "deepseek/deepseek-v4-flash",
+  "model": "newapi/deepseek-v4-flash",
   "provider": {
     "newapi": {
       "npm": "@ai-sdk/openai-compatible",

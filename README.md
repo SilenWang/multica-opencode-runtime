@@ -106,12 +106,12 @@ multica daemon start
 启动时写入两份配置：
 
 - `~/.local/share/opencode/auth.json`：写入所有已提供的 provider key（`deepseek`、`newapi`）。
-- `~/.config/opencode/opencode.json`：注册自定义 provider `newapi`（`@ai-sdk/openai-compatible`，`baseURL = $NEW_API_BASE_URL/v1`），并设默认模型 `deepseek/deepseek-v4-flash`。该 provider 下注册了 `deepseek-v4-flash`、`deepseek-v4.1-flash` 与 `kimi-k3`；`deepseek-v4.1-flash` 用 `"modalities": { "input": ["text","image"] }` 显式声明图片输入能力（opencode 的图片能力只看 `modalities.input`，`attachment: true` 只会打开 `capabilities.attachment`，不会打开 `capabilities.input.image`，两者实测互不替代）。
+- `~/.config/opencode/opencode.json`：注册自定义 provider `newapi`（`@ai-sdk/openai-compatible`，`baseURL = $NEW_API_BASE_URL/v1`），并设默认模型 `newapi/deepseek-v4-flash`（New-API 网关下的 deepseek）。该 provider 下注册了 `deepseek-v4-flash`、`deepseek-v4.1-flash` 与 `kimi-k3`；`deepseek-v4.1-flash` 用 `"modalities": { "input": ["text","image"] }` 显式声明图片输入能力（opencode 的图片能力只看 `modalities.input`，`attachment: true` 只会打开 `capabilities.attachment`，不会打开 `capabilities.input.image`，两者实测互不替代）。
 
-默认模型 `deepseek/deepseek-v4-flash` 走 DeepSeek 官方；想用 New-API 网关时：
+默认模型 `newapi/deepseek-v4-flash` 走 New-API 网关；想切回 DeepSeek 官方时：
 
 ```bash
-opencode --model newapi/deepseek-v4-flash
+opencode --model deepseek/deepseek-v4-flash
 opencode --model newapi/deepseek-v4.1-flash
 opencode --model newapi/kimi-k3
 ```
@@ -159,7 +159,7 @@ New-API 上游会经内置的 CLIProxyAPI 桥接（见下节）；DeepSeek 官�
 - `~/.reasonix/config.toml`：
 
   ```toml
-  default_model = "deepseek/deepseek-v4-flash"
+  default_model = "newapi/deepseek-v4-flash"
   language = "zh"
 
   [[providers]]                # deepseek 官方
@@ -196,7 +196,7 @@ reasonix run --model deepseek "..."        # 切到 DeepSeek 官方
 > `vision_models` 字段，模板里两处都写，兼容新旧版本。详见 Reasonix 的
 > `docs/MODEL_CAPABILITIES.md`。
 
-可选：`REASONIX_DEFAULT_MODEL` 覆盖默认模型（默认 `deepseek/deepseek-v4-flash`）。
+可选：`REASONIX_DEFAULT_MODEL` 覆盖默认模型（有 `NEW_API_TOKEN` 时默认 `newapi/deepseek-v4-flash`，否则回退 `deepseek/deepseek-v4-flash`）。
 
 > **bash 沙箱（已启用）**：Reasonix **1.38.8 起权限 preset（read-only / workspace-write）
 > 接管 bash 沙箱**，ACP 新会话的 preset 是 `workspace-write`，reasonix 会用
