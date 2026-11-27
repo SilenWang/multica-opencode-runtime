@@ -156,9 +156,10 @@ Codex 经本机的**请求清洗代理**连接 New-API 的 `/v1/responses`（默
 codex ──responses──> 127.0.0.1:8321 (codex-responses-filter) ──responses──> New-API
 ```
 
-代理不做协议转换，只把会话历史里的 `custom_tool_call` / `custom_tool_call_output`
-改写成上游接受的 `function_call` / `function_call_output`，其余请求、SSE 响应与
-错误原样透传；代理起不来时自动回退直连。原因见
+代理不做协议转换，只做两件兼容改写：把上游白名单（message / reasoning /
+function_call / function_call_output）之外的 item 降级成等价形态；并在请求携带
+`previous_response_id` / `item_reference` 时用本地 transcript 展开成完整 item。
+其余请求、SSE 响应与错误原样透传；代理起不来时自动回退直连。原因见
 [Codex 长会话稳定性](#codex-长会话稳定性)。
 
 Codex 只支持 `responses` 协议，所以未配置 `NEW_API_TOKEN` 时不会生成 Codex 配置；
@@ -190,22 +191,45 @@ code: unsupported_input_item  (HTTP 400, url: $NEW_API_BASE_URL/v1/responses)
    Codex 对该错误不降级重试（`will_retry=false`），任务直接失败。
 4. 用失败会话 rollout 里的原始 `custom_tool_call` 回放可直接复现同样的 400；把同一
    item 改写成 `function_call` 后返回 200（见 `scripts/test-codex-responses-filter.mjs`）。
+5. 同一错误也可能来自其它非白名单 item：Codex 的 `ResponseItem` 还包含
+   `local_shell_call`、`compaction` / `context_compaction`（`remote_compaction_v2`
+   压缩产物，只有加密内容，跨上游无法解密）、`web_search_call`、
+   `image_generation_call`、`tool_search_*`、`additional_tools` 等。上游对这些
+   未识别 item 统一回同一句 “Item references need stored responses”，所以不能只
+   按错误文本区分来源（另一 vybio 工作区的报错即属此类）。
+6. 对 `previous_response_id` / `item_reference` 的核查：Codex 0.171 的 HTTP 请求
+   **两者都不发送**（抓包确认；源码里 `previous_response_id` 仅出现在 websocket
+   分支，`item_reference` 不在 `ResponseItem` 枚举中）。但只要客户端/版本改成增量
+   模式，这类引用就依赖服务端 stored response；New-API 侧 `store=false` 且
+   `previous_response_id` 恒 400，因此代理必须能自行展开。
 
 因此容器不恢复完整的 CLIProxyAPI（那是重量级第三方协议转换，且曾需要
 `disable-cooling` 来规避单凭据冷却导致的 503），而是在 `entrypoint.sh` 里启动
-`scripts/codex-responses-filter.mjs` 做最小改写。相关开关：
+`scripts/codex-responses-filter.mjs`：
+
+- **白名单降级**：`custom_tool_call`(`_output`) → `function_call`(`_output`)；
+  `local_shell_call` → `function_call`；压缩/搜索/图片/未知类型 → 占位 message；
+  转换后的 item 去掉依赖服务端存储的 `id`。
+- **本地 transcript 重建**：代理按请求头 `session-id` 分会话，缓存每个
+  `response.completed` 的 output（response id → output、item id → item，落盘
+  JSONL）。请求带 `previous_response_id` 时用缓存的 output 拼回完整 input 并删掉
+  该字段；带 `item_reference` 时展开成完整 item；缓存缺失时用占位 message 降级，
+  绝不让请求因引用失效而 400。
+
+相关开关：
 
 | 变量 | 默认 | 说明 |
 | --- | --- | --- |
 | `CODEX_FILTER` | `on` | `off` 时关闭代理、直连 New-API（旧行为，长会话仍可能失败） |
 | `CODEX_FILTER_PORT` | `8321` | 代理端口（仅绑 `127.0.0.1`） |
+| `CODEX_FILTER_STATE` | `~/.codex/responses-filter-state.jsonl` | transcript 落盘位置；容器重建后旧会话的引用仍可展开 |
 
-排查：`tail -f /tmp/codex-responses-filter.log`（每次改写会打印
-`rewrote N custom tool item(s)`）。
+排查：`tail -f /tmp/codex-responses-filter.log`（改写会打印
+`session=… rewrote N item(s), expanded M`）。
 
-> 仍未覆盖的情况：会话历史中若已经有上游不支持、且无法安全翻译的 item，需要
-> 用新会话（`multica repo checkout --fresh` / 新 Codex session）重跑；此外
-> Codex CLI 在 Dockerfile 里未固定版本（构建时取 npm 最新），行为可能随版本变化。
+> 未覆盖：若本地 transcript 也缺失（换容器且状态未持久化），展开会降级为占位
+> message —— 请求不会失败，但该段上下文会丢失，需重跑相关步骤。此外 Codex CLI
+> 在 Dockerfile 里未固定版本（构建时取 npm 最新），行为可能随版本变化。
 
 ### Reasonix
 
