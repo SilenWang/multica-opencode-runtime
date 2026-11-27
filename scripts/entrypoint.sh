@@ -185,11 +185,18 @@ fi
 #   "Item references need stored responses, which are not kept"
 # （code=unsupported_input_item），而 Codex 不会降级重试，任务直接失败。
 #
-# 这里在 127.0.0.1 起一个极简代理，只把这两类 item 翻译成上游接受的
-# function_call / function_call_output，并去掉依赖服务端存储的 item id；
-# 其余请求、SSE 响应与错误全部原样透传。代理起不来时回退直连，不阻塞启动。
+# 同一错误也可能来自其它非白名单 item（local_shell_call、远程压缩产生的
+# compaction/context_compaction、web_search_call 等），或来自
+# previous_response_id / item_reference 这类需要服务端 stored response 的引用。
+# 因此代理做两件事：
+#   1) 用本地 transcript（缓存的 response output）展开 previous_response_id 与
+#      item_reference；缓存缺失时安全降级（删字段/换成占位 message），不让请求 400；
+#   2) 把白名单（message/reasoning/function_call/function_call_output）之外的
+#      item 降级成 function 或占位 message。
+# 其余请求、SSE 响应与错误全部原样透传；代理起不来时回退直连，不阻塞启动。
 #
-# 开关 CODEX_FILTER：on（默认）/ off；端口 CODEX_FILTER_PORT（默认 8321）。
+# 开关 CODEX_FILTER：on（默认）/ off；端口 CODEX_FILTER_PORT（默认 8321）；
+# transcript 落盘 CODEX_FILTER_STATE（默认 ~/.codex/responses-filter-state.jsonl）。
 CODEX_FILTER_URL=""
 setup_codex_responses_filter() {
     CODEX_FILTER_PORT="${CODEX_FILTER_PORT:-8321}"
@@ -213,10 +220,13 @@ setup_codex_responses_filter() {
     fi
 
     local filter_log="/tmp/codex-responses-filter.log"
-    echo "Starting Codex responses filter on 127.0.0.1:${CODEX_FILTER_PORT}..."
+    local filter_state="${CODEX_FILTER_STATE:-/home/ubuntu/.codex/responses-filter-state.jsonl}"
+    mkdir -p "$(dirname "${filter_state}")"
+    echo "Starting Codex responses filter on 127.0.0.1:${CODEX_FILTER_PORT} (state: ${filter_state})..."
     CODEX_FILTER_PORT="${CODEX_FILTER_PORT}" \
     CODEX_FILTER_UPSTREAM="${NEW_API_BASE_URL:-http://192.168.8.228:3000}" \
     CODEX_FILTER_TOKEN="${NEW_API_TOKEN}" \
+    CODEX_FILTER_STATE="${filter_state}" \
         nohup node /codex-responses-filter.mjs >> "${filter_log}" 2>&1 &
     echo $! > /tmp/codex-responses-filter.pid
 
