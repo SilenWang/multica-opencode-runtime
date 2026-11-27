@@ -120,6 +120,7 @@ RUN curl -fsSL https://biomcp.org/install.sh -o /tmp/biomcp-install.sh \
 
 COPY scripts/entrypoint.sh /entrypoint.sh
 COPY scripts/codex-models.json /codex-models.json
+COPY scripts/codex-responses-filter.mjs /codex-responses-filter.mjs
 COPY scripts/codex-trust-plugin-hooks.mjs /codex-trust-plugin-hooks.mjs
 COPY scripts/opencode-mcp.mjs /opencode-mcp.mjs
 
