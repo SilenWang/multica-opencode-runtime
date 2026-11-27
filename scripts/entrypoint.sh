@@ -175,7 +175,68 @@ if [ -n "$NEW_API_TOKEN" ]; then
 OPENCODE_JSON
 fi
 
-# 4. 配置 Codex：直连 New-API 的 /v1/responses（容器内不再做协议转换）
+# 4. Codex responses 请求清洗代理（SIL-1033）
+#
+# Codex 0.171 会用全量历史回放会话，apply_patch 这类 freeform 工具产生的
+# `custom_tool_call` / `custom_tool_call_output` item 会留在历史里。New-API 的
+# responses 通道是无状态的（store 被强制为 false，previous_response_id 一律
+# 400），只能靠上游保存过的 response 解析这类 item；会话间隔过长、channel
+# 切换或上游存储过期后，就会返回
+#   "Item references need stored responses, which are not kept"
+# （code=unsupported_input_item），而 Codex 不会降级重试，任务直接失败。
+#
+# 这里在 127.0.0.1 起一个极简代理，只把这两类 item 翻译成上游接受的
+# function_call / function_call_output，并去掉依赖服务端存储的 item id；
+# 其余请求、SSE 响应与错误全部原样透传。代理起不来时回退直连，不阻塞启动。
+#
+# 开关 CODEX_FILTER：on（默认）/ off；端口 CODEX_FILTER_PORT（默认 8321）。
+CODEX_FILTER_URL=""
+setup_codex_responses_filter() {
+    CODEX_FILTER_PORT="${CODEX_FILTER_PORT:-8321}"
+    if [ "${CODEX_FILTER:-on}" != "on" ]; then
+        echo "Codex responses filter disabled (CODEX_FILTER=${CODEX_FILTER})."
+        return
+    fi
+    if [ -z "${NEW_API_TOKEN:-}" ]; then
+        return
+    fi
+    if ! command -v node > /dev/null 2>&1 || [ ! -f /codex-responses-filter.mjs ]; then
+        echo "WARNING: node or /codex-responses-filter.mjs missing; Codex connects to New-API directly."
+        return
+    fi
+
+    # 容器重启时清掉可能残留的旧实例
+    if [ -f /tmp/codex-responses-filter.pid ]; then
+        kill "$(cat /tmp/codex-responses-filter.pid)" 2>/dev/null || true
+        rm -f /tmp/codex-responses-filter.pid
+        sleep 1
+    fi
+
+    local filter_log="/tmp/codex-responses-filter.log"
+    echo "Starting Codex responses filter on 127.0.0.1:${CODEX_FILTER_PORT}..."
+    CODEX_FILTER_PORT="${CODEX_FILTER_PORT}" \
+    CODEX_FILTER_UPSTREAM="${NEW_API_BASE_URL:-http://192.168.8.228:3000}" \
+    CODEX_FILTER_TOKEN="${NEW_API_TOKEN}" \
+        nohup node /codex-responses-filter.mjs >> "${filter_log}" 2>&1 &
+    echo $! > /tmp/codex-responses-filter.pid
+
+    local i
+    for i in $(seq 1 20); do
+        if curl -fsS --max-time 2 "http://127.0.0.1:${CODEX_FILTER_PORT}/healthz" > /dev/null 2>&1; then
+            CODEX_FILTER_URL="http://127.0.0.1:${CODEX_FILTER_PORT}/v1"
+            echo "Codex responses filter ready (pid $(cat /tmp/codex-responses-filter.pid), log ${filter_log})."
+            return
+        fi
+        sleep 1
+    done
+
+    echo "WARNING: Codex responses filter did not become ready in 20s; see ${filter_log}. Codex connects to New-API directly."
+    kill "$(cat /tmp/codex-responses-filter.pid)" 2>/dev/null || true
+    rm -f /tmp/codex-responses-filter.pid
+}
+setup_codex_responses_filter
+
+# 5. 配置 Codex：经本地清洗代理连接 New-API 的 /v1/responses
 #
 # Codex CLI 只支持 OpenAI 的 responses 协议（chat wire_api 已在 0.x 移除），
 # 因此需要一个直接提供 /v1/responses 的上游。New-API 已支持 responses 直连；
@@ -194,13 +255,19 @@ setup_codex_official() {
     # (includes base_instructions, required by Codex CLI >= 0.144.0)
     cp /codex-models.json /home/ubuntu/.codex/models.json
 
-    # Codex 会在 base_url 后拼接 /responses，因此这里要补到 /v1。
-    local codex_base_url="${NEW_API_BASE_URL:-http://192.168.8.228:3000}"
-    codex_base_url="${codex_base_url%/}"
-    case "${codex_base_url}" in
-        */v1) : ;;
-        *) codex_base_url="${codex_base_url}/v1" ;;
-    esac
+    # 清洗代理已监听 127.0.0.1 时直接用它；否则保持直连 New-API。
+    # Codex 会在 base_url 后拼接 /responses，直连时要补到 /v1。
+    local codex_base_url
+    if [ -n "${CODEX_FILTER_URL}" ]; then
+        codex_base_url="${CODEX_FILTER_URL}"
+    else
+        codex_base_url="${NEW_API_BASE_URL:-http://192.168.8.228:3000}"
+        codex_base_url="${codex_base_url%/}"
+        case "${codex_base_url}" in
+            */v1) : ;;
+            *) codex_base_url="${codex_base_url}/v1" ;;
+        esac
+    fi
 
     cat > /home/ubuntu/.codex/config.toml << CODEX_CONFIG_TOML
 model = "deepseek-v4-flash"
@@ -219,7 +286,7 @@ wire_api = "responses"
 experimental_bearer_token = "${NEW_API_TOKEN}"
 CODEX_CONFIG_TOML
 
-    echo "Codex ready with direct New-API responses integration (model: deepseek-v4-flash, base_url: ${codex_base_url})."
+    echo "Codex ready (model: deepseek-v4-flash, base_url: ${codex_base_url}, responses filter: ${CODEX_FILTER_URL:-off})."
     chmod 600 /home/ubuntu/.codex/config.toml 2>/dev/null || true
 }
 setup_codex_official

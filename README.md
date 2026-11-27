@@ -149,7 +149,63 @@ codex -m kimi-k3                  # 换用 Kimi K3
 codex -i screenshot.png           # deepseek 两个模型都声明了图片输入能力
 ```
 
-Codex 直连 New-API 的 `/v1/responses`，中间不再有本地协议转换进程。Codex 只支持 `responses` 协议，所以未配置 `NEW_API_TOKEN` 时不会生成 Codex 配置；DeepSeek 官方（只有 `chat/completions`）仍可供 Reasonix / opencode 使用。
+Codex 经本机的**请求清洗代理**连接 New-API 的 `/v1/responses`（默认
+`127.0.0.1:8321`）：
+
+```
+codex ──responses──> 127.0.0.1:8321 (codex-responses-filter) ──responses──> New-API
+```
+
+代理不做协议转换，只把会话历史里的 `custom_tool_call` / `custom_tool_call_output`
+改写成上游接受的 `function_call` / `function_call_output`，其余请求、SSE 响应与
+错误原样透传；代理起不来时自动回退直连。原因见
+[Codex 长会话稳定性](#codex-长会话稳定性)。
+
+Codex 只支持 `responses` 协议，所以未配置 `NEW_API_TOKEN` 时不会生成 Codex 配置；
+DeepSeek 官方（只有 `chat/completions`）仍可供 Reasonix / opencode 使用。
+
+### Codex 长会话稳定性
+
+移除 CLIProxyAPI 直连 New-API 后，长会话（尤其跨小时/跨天继续的 Codex 会话）会
+偶发整轮失败，错误为：
+
+```
+input items may be messages, function calls, function call outputs and reasoning.
+Item references need stored responses, which are not kept.
+code: unsupported_input_item  (HTTP 400, url: $NEW_API_BASE_URL/v1/responses)
+```
+
+实测定位（SIL-1033）：
+
+1. Codex 0.171 的 HTTP responses 请求**不发 `previous_response_id`**，每跳都回放
+   全量历史（抓包：`store=false`、`previous_response_id` 缺失）。所以问题不是
+   `previous_response_id` 复用，而是历史里的 **item 类型**。
+2. `apply_patch` 在 `models.json` 里是 `"apply_patch_tool_type": "freeform"`，对应
+   请求 tools 里的 `{"type":"custom","name":"apply_patch"}`；模型用它改文件后，
+   历史中会出现 `custom_tool_call` / `custom_tool_call_output`。
+3. New-API 的 responses 通道无状态（`store` 被改回 `false`，任何
+   `previous_response_id` 都返回 `400 invalid response ID`），它把这两类 item 当成
+   “item reference”，要求上游保存过对应 response。会话间隔过长、上游 channel
+   切换或响应存储过期后无法解析，于是 400 `unsupported_input_item`；
+   Codex 对该错误不降级重试（`will_retry=false`），任务直接失败。
+4. 用失败会话 rollout 里的原始 `custom_tool_call` 回放可直接复现同样的 400；把同一
+   item 改写成 `function_call` 后返回 200（见 `scripts/test-codex-responses-filter.mjs`）。
+
+因此容器不恢复完整的 CLIProxyAPI（那是重量级第三方协议转换，且曾需要
+`disable-cooling` 来规避单凭据冷却导致的 503），而是在 `entrypoint.sh` 里启动
+`scripts/codex-responses-filter.mjs` 做最小改写。相关开关：
+
+| 变量 | 默认 | 说明 |
+| --- | --- | --- |
+| `CODEX_FILTER` | `on` | `off` 时关闭代理、直连 New-API（旧行为，长会话仍可能失败） |
+| `CODEX_FILTER_PORT` | `8321` | 代理端口（仅绑 `127.0.0.1`） |
+
+排查：`tail -f /tmp/codex-responses-filter.log`（每次改写会打印
+`rewrote N custom tool item(s)`）。
+
+> 仍未覆盖的情况：会话历史中若已经有上游不支持、且无法安全翻译的 item，需要
+> 用新会话（`multica repo checkout --fresh` / 新 Codex session）重跑；此外
+> Codex CLI 在 Dockerfile 里未固定版本（构建时取 npm 最新），行为可能随版本变化。
 
 ### Reasonix
 

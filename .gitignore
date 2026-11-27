@@ -5,3 +5,4 @@ data/multica_daemon/*
 !data/multica_daemon/.gitkeep
 
 .env
+.pixi/
