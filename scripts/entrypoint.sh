@@ -175,84 +175,205 @@ if [ -n "$NEW_API_TOKEN" ]; then
 OPENCODE_JSON
 fi
 
-# 4. Codex responses 兼容代理（默认关闭；网关侧已接管）
+# 4. CLIProxyAPI 桥接：Codex 的 responses → 上游 chat/completions 协议转换
 #
-# 默认部署走 New-API 网关侧过滤：commandcode 渠道的「参数覆盖」用 prune_objects
-# 删除 custom_tool_call / custom_tool_call_output（同一份真实历史实测 400→200，
-# input_tokens 从 571 降到基线 31），runtime 不再需要本地代理。
+# Codex 只支持 responses 协议；上游（new-api 或 DeepSeek 官方）的实际 responses
+# 支持并不一致。桥接把 responses 请求翻译成 chat/completions 再转发，天然不会出现
+# `custom_tool_call` 之类上游不认的 item（SIL-1033 的 unsupported_input_item 就属于
+# 这类协议差异）。容器内曾于 73d9f3b 移除桥接、改直连；现按最终方向恢复。
 #
-# 下面的代理保留为回滚手段（默认 off，显式 CODEX_FILTER=on 才启动）：
-# Codex 0.171 全量回放历史时，若上游仍拒绝白名单外的 item（custom_tool_call、
-# local_shell_call、compaction/context_compaction 等），或请求带
-# previous_response_id / item_reference 而网关无 stored response，代理会：
-#   1) 用本地 transcript（缓存的 response output）展开 previous_response_id 与
-#      item_reference；缓存缺失时安全降级（删字段/换成占位 message），不让请求 400；
-#   2) 把白名单（message/reasoning/function_call/function_call_output）之外的
-#      item 降级成 function 或占位 message。
-# 其余请求、SSE 响应与错误全部原样透传；代理起不来时回退直连，不阻塞启动。
+# 模型映射不写死：启动时优先 `CLIPROXY_MODELS`，否则请求
+# `$BRIDGE_BASE_URL/v1/models` 动态生成；端点失败/空返回时回退内置默认列表
+# （scripts/cliproxy-models.mjs）。因此上游加/换模型只需重启容器，不用重建镜像。
 #
-# 开关 CODEX_FILTER：off（默认）/ on（回滚）；端口 CODEX_FILTER_PORT（默认 8321）；
-# transcript 落盘 CODEX_FILTER_STATE（默认 ~/.codex/responses-filter-state.jsonl）。
-CODEX_FILTER_URL=""
-setup_codex_responses_filter() {
-    CODEX_FILTER_PORT="${CODEX_FILTER_PORT:-8321}"
-    if [ "${CODEX_FILTER:-off}" != "on" ]; then
-        echo "Codex responses filter disabled (CODEX_FILTER=${CODEX_FILTER:-off}; gateway-side prune_objects is the default)."
+# 开关 CLIPROXY_BRIDGE：
+#   auto（默认）—— 上游为 newapi 时始终启用（其 responses 流式支持不完整）；
+#                   其它上游探测 POST /v1/responses，明确不支持时才启用，
+#                   探测不明（401/403/5xx/网络不通）保持既有直连行为
+#   on  —— 无条件启用
+#   off —— 禁用，保持直连（回滚到“直连 + 网关侧 prune_objects”方案）
+CODEX_BRIDGE_URL=""
+setup_cliproxyapi() {
+    CLIPROXY_BRIDGE="${CLIPROXY_BRIDGE:-auto}"
+    CLIPROXY_PORT="${CLIPROXY_PORT:-8317}"
+    CLIPROXY_HOME="${CLIPROXY_HOME:-/home/ubuntu/.cli-proxy-api}"
+    local cliproxy_bin="${CLIPROXY_BIN:-cliproxyapi}"
+    local models_script="${CLIPROXY_MODELS_SCRIPT:-/cliproxy-models.mjs}"
+    CODEX_BRIDGE_URL=""
+
+    # Codex 的直连上游，与下面 setup_codex_official 的优先级保持一致
+    if [ -n "${NEW_API_TOKEN:-}" ]; then
+        BRIDGE_UPSTREAM="newapi"
+        BRIDGE_BASE_URL="${NEW_API_BASE_URL:-http://192.168.8.228:3000}"
+        BRIDGE_TOKEN="${NEW_API_TOKEN}"
+    else
+        BRIDGE_UPSTREAM="deepseek"
+        BRIDGE_BASE_URL="https://api.deepseek.com"
+        BRIDGE_TOKEN="${DEEPSEEK_TOKEN:-}"
+    fi
+    BRIDGE_MODELS_DEFAULT="deepseek-v4-flash,deepseek-v4.1-flash,qwen3.8-flash,kimi-k3"
+    if [ "${BRIDGE_UPSTREAM}" = "deepseek" ]; then
+        BRIDGE_MODELS_DEFAULT="deepseek-v4-flash"
+    fi
+
+    if [ "${CLIPROXY_BRIDGE}" = "off" ]; then
+        echo "CLIProxyAPI bridge disabled (CLIPROXY_BRIDGE=off); Codex connects to ${BRIDGE_UPSTREAM} directly."
         return
     fi
-    if [ -z "${NEW_API_TOKEN:-}" ]; then
+    if [ -z "${BRIDGE_TOKEN}" ]; then
+        echo "CLIProxyAPI bridge skipped: no token for upstream ${BRIDGE_UPSTREAM}."
         return
     fi
-    local filter_script="${CODEX_FILTER_SCRIPT:-/codex-responses-filter.mjs}"
-    local filter_pidfile="${CODEX_FILTER_PIDFILE:-/tmp/codex-responses-filter.pid}"
-    if ! command -v node > /dev/null 2>&1 || [ ! -f "${filter_script}" ]; then
-        echo "WARNING: node or ${filter_script} missing; Codex connects to New-API directly."
+    if ! command -v "${cliproxy_bin}" > /dev/null 2>&1; then
+        echo "WARNING: ${cliproxy_bin} not installed; Codex will connect to ${BRIDGE_UPSTREAM} directly."
         return
     fi
 
+    if [ "${CLIPROXY_BRIDGE}" = "on" ]; then
+        echo "CLIProxyAPI bridge forced on (CLIPROXY_BRIDGE=on) for upstream ${BRIDGE_UPSTREAM}."
+    elif [ "${BRIDGE_UPSTREAM}" = "newapi" ]; then
+        echo "Upstream newapi uses CLIProxyAPI bridge (its responses streaming is incomplete)."
+    else
+        # 其它上游（如 DeepSeek 官方）只在明确不支持 responses 时桥接，
+        # 结论不明（401/403/5xx/网络不通）时保持既有直连行为。
+        local probe_base="${BRIDGE_BASE_URL%/}"
+        case "${probe_base}" in
+            */v1) : ;;
+            *) probe_base="${probe_base}/v1" ;;
+        esac
+        local probe_code
+        probe_code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 \
+            -X POST "${probe_base}/responses" \
+            -H "Authorization: Bearer ${BRIDGE_TOKEN}" \
+            -H 'content-type: application/json' \
+            -d "{\"model\":\"$(printf '%s' "${BRIDGE_MODELS_DEFAULT}" | cut -d, -f1)\",\"input\":\"ping\",\"stream\":false}" \
+            2>/dev/null) || true
+        # 连不上时 curl 自身输出 000
+        probe_code="${probe_code:-000}"
+        case "${probe_code}" in
+            404|405|501|400)
+                echo "Upstream ${BRIDGE_UPSTREAM} does not serve /v1/responses (HTTP ${probe_code}); enabling CLIProxyAPI bridge." ;;
+            *)
+                echo "CLIProxyAPI bridge skipped: /v1/responses probe inconclusive (HTTP ${probe_code})."
+                return ;;
+        esac
+    fi
+
+    mkdir -p "${CLIPROXY_HOME}/auth" "${CLIPROXY_HOME}/logs"
+
+    # 桥接自身的访问 key：外部给定优先，否则复用/生成一个（只监听 127.0.0.1）
+    if [ -z "${CLIPROXY_API_KEY:-}" ]; then
+        if [ -s "${CLIPROXY_HOME}/api_key" ]; then
+            CLIPROXY_API_KEY=$(cat "${CLIPROXY_HOME}/api_key")
+        else
+            CLIPROXY_API_KEY="sk-$(head -c 24 /dev/urandom | od -An -tx1 | tr -d ' \n')"
+        fi
+        printf '%s' "${CLIPROXY_API_KEY}" > "${CLIPROXY_HOME}/api_key"
+    fi
+
+    # 模型映射：CLIPROXY_MODELS 显式指定 > /v1/models 动态发现 > 内置默认。
+    # 发现逻辑放在 scripts/cliproxy-models.mjs（可单测）；这里还保留 shell 兜底，
+    # 即使 node/脚本缺失也能生成可用的默认映射。
+    local models_yaml=""
+    if command -v node > /dev/null 2>&1 && [ -f "${models_script}" ]; then
+        models_yaml=$(node "${models_script}" \
+            --upstream "${BRIDGE_UPSTREAM}" \
+            --base-url "${BRIDGE_BASE_URL}" \
+            --token "${BRIDGE_TOKEN}" \
+            --fallback "${BRIDGE_MODELS_DEFAULT}" \
+            --models "${CLIPROXY_MODELS:-}" 2>> "${CLIPROXY_HOME}/logs/models.log") || models_yaml=""
+    fi
+    if [ -z "${models_yaml}" ]; then
+        echo "WARNING: CLIProxyAPI model discovery unavailable; falling back to ${BRIDGE_MODELS_DEFAULT}."
+        local entry
+        for entry in $(printf '%s' "${CLIPROXY_MODELS:-${BRIDGE_MODELS_DEFAULT}}" | tr ',' ' '); do
+            local m_name="${entry%%:*}" m_alias="${entry##*:}"
+            models_yaml="${models_yaml}      - name: \"${m_name}\"
+        alias: \"${m_alias}\"
+"
+        done
+    fi
+    local model_count
+    model_count=$(printf '%s' "${models_yaml}" | grep -c 'name:' || true)
+
+    cat > "${CLIPROXY_HOME}/config.yaml" << CLIPROXY_CONFIG
+# 由 entrypoint.sh 生成，请勿手工编辑（容器重启即覆盖）
+host: "127.0.0.1"
+port: ${CLIPROXY_PORT}
+remote-management:
+  allow-remote: false
+  secret-key: ""
+  disable-control-panel: true
+auth-dir: "${CLIPROXY_HOME}/auth"
+api-keys:
+  - "${CLIPROXY_API_KEY}"
+debug: false
+logging-to-file: true
+logs-max-total-size-mb: 20
+usage-statistics-enabled: false
+request-retry: 2
+max-retry-interval: 10
+# 单凭据桥接必须关闭凭据冷却：桥接只有一条上游凭据（下面 api-key-entries 唯一），
+# 上游任意一次瞬时失败（5xx/超时/断流）都会让 CLIProxyAPI 把这条唯一凭据置入
+# 冷却（默认 60s，401/403 为 30m，404 为 12h），冷却期内所有请求直接返回
+# 503 auth_unavailable: no auth available —— 没有第二条凭据可切换，冷却只把
+# 上游抖动放大成整段黑屏，表现为"用一段时间就 503"。关闭后真实上游错误直接
+# 透传，交由 Codex / request-retry 重试。
+disable-cooling: true
+openai-compatibility:
+  - name: "${BRIDGE_UPSTREAM}"
+    disabled: false
+    base-url: "${BRIDGE_BASE_URL%/}/v1"
+    api-key-entries:
+      - api-key: "${BRIDGE_TOKEN}"
+    models:
+${models_yaml}
+CLIPROXY_CONFIG
+    chmod 600 "${CLIPROXY_HOME}/config.yaml" "${CLIPROXY_HOME}/api_key" 2>/dev/null || true
+
     # 容器重启时清掉可能残留的旧实例
-    if [ -f "${filter_pidfile}" ]; then
-        kill "$(cat "${filter_pidfile}")" 2>/dev/null || true
-        rm -f "${filter_pidfile}"
+    if [ -f "${CLIPROXY_HOME}/cliproxyapi.pid" ]; then
+        kill "$(cat "${CLIPROXY_HOME}/cliproxyapi.pid")" 2>/dev/null || true
         sleep 1
     fi
 
-    local filter_log="/tmp/codex-responses-filter.log"
-    local filter_state="${CODEX_FILTER_STATE:-/home/ubuntu/.codex/responses-filter-state.jsonl}"
-    mkdir -p "$(dirname "${filter_state}")"
-    echo "Starting Codex responses filter on 127.0.0.1:${CODEX_FILTER_PORT} (state: ${filter_state})..."
-    CODEX_FILTER_PORT="${CODEX_FILTER_PORT}" \
-    CODEX_FILTER_UPSTREAM="${NEW_API_BASE_URL:-http://192.168.8.228:3000}" \
-    CODEX_FILTER_TOKEN="${NEW_API_TOKEN}" \
-    CODEX_FILTER_STATE="${filter_state}" \
-        nohup node "${filter_script}" >> "${filter_log}" 2>&1 &
-    echo $! > "${filter_pidfile}"
+    echo "Starting CLIProxyAPI on 127.0.0.1:${CLIPROXY_PORT} (upstream: ${BRIDGE_UPSTREAM}, models: ${model_count})..."
+    nohup "${cliproxy_bin}" --config "${CLIPROXY_HOME}/config.yaml" \
+        >> "${CLIPROXY_HOME}/logs/cliproxyapi.log" 2>&1 &
+    echo $! > "${CLIPROXY_HOME}/cliproxyapi.pid"
 
-    local i
-    for i in $(seq 1 20); do
-        if curl -fsS --max-time 2 "http://127.0.0.1:${CODEX_FILTER_PORT}/healthz" > /dev/null 2>&1; then
-            CODEX_FILTER_URL="http://127.0.0.1:${CODEX_FILTER_PORT}/v1"
-            echo "Codex responses filter ready (pid $(cat "${filter_pidfile}"), log ${filter_log})."
-            return
+    # 健康检查：/v1/models 能列出桥接模型才算真正起来
+    local ready=false
+    local _
+    for _ in $(seq 1 30); do
+        if curl -s --max-time 5 "http://127.0.0.1:${CLIPROXY_PORT}/v1/models" \
+                -H "Authorization: Bearer ${CLIPROXY_API_KEY}" 2>/dev/null \
+                | grep -q '"id"'; then
+            ready=true
+            break
         fi
         sleep 1
     done
-
-    echo "WARNING: Codex responses filter did not become ready in 20s; see ${filter_log}. Codex connects to New-API directly."
-    kill "$(cat "${filter_pidfile}")" 2>/dev/null || true
-    rm -f "${filter_pidfile}"
+    if [ "${ready}" != "true" ]; then
+        echo "WARNING: CLIProxyAPI did not become ready in 30s; see ${CLIPROXY_HOME}/logs/cliproxyapi.log. Codex falls back to direct ${BRIDGE_UPSTREAM}."
+        CODEX_BRIDGE_URL=""
+        return
+    fi
+    CODEX_BRIDGE_URL="http://127.0.0.1:${CLIPROXY_PORT}/v1"
+    echo "CLIProxyAPI bridge ready (pid $(cat "${CLIPROXY_HOME}/cliproxyapi.pid"), models: $(printf '%s' "${models_yaml}" | grep -o 'name: \"[^\"]*' | sed 's/name: \"//' | tr '\n' ',' | sed 's/,$//'))."
 }
-setup_codex_responses_filter
 
-# 5. 配置 Codex：经本地清洗代理连接 New-API 的 /v1/responses
+setup_cliproxyapi
+
+# 5. 配置 Codex：桥接就绪时走 CLIProxyAPI，否则直连上游
 #
-# Codex CLI 只支持 OpenAI 的 responses 协议（chat wire_api 已在 0.x 移除），
-# 因此需要一个直接提供 /v1/responses 的上游。New-API 已支持 responses 直连；
-# DeepSeek 官方只有 chat/completions，不能作为 Codex 的直连上游（Reasonix /
-# opencode 仍可正常使用它）。未配置 NEW_API_TOKEN 时跳过 Codex 配置。
+# Codex CLI 只支持 responses 协议。桥接就绪时 base_url 指向
+# 127.0.0.1:${CLIPROXY_PORT}（responses → chat/completions，由 CLIProxyAPI 转换），
+# token 用桥接自身的 key；桥接未启用/未就绪时保持直连上游（New-API 优先，
+# 无 NEW_API_TOKEN 时回退 DeepSeek 官方）。
 setup_codex_official() {
-    if [ -z "${NEW_API_TOKEN:-}" ]; then
-        echo "WARNING: NEW_API_TOKEN not set; Codex setup skipped (Codex requires a responses-capable upstream such as New-API)."
+    if [ -z "${DEEPSEEK_TOKEN:-}" ] && [ -z "${NEW_API_TOKEN:-}" ]; then
+        echo "WARNING: Neither DEEPSEEK_TOKEN nor NEW_API_TOKEN set. Codex setup skipped."
         return
     fi
 
@@ -263,23 +384,28 @@ setup_codex_official() {
     # (includes base_instructions, required by Codex CLI >= 0.144.0)
     cp /codex-models.json /home/ubuntu/.codex/models.json
 
-    # 清洗代理已监听 127.0.0.1 时直接用它；否则保持直连 New-API。
-    # Codex 会在 base_url 后拼接 /responses，直连时要补到 /v1。
-    local codex_base_url
-    if [ -n "${CODEX_FILTER_URL}" ]; then
-        codex_base_url="${CODEX_FILTER_URL}"
+    # 上游名字与直连地址沿用既有优先级（New-API 优先，否则 DeepSeek 官方）
+    local codex_provider codex_direct_url codex_direct_token
+    if [ -n "${NEW_API_TOKEN:-}" ]; then
+        codex_provider="newapi"
+        codex_direct_url="${NEW_API_BASE_URL:-http://192.168.8.228:3000}"
+        codex_direct_token="${NEW_API_TOKEN}"
     else
-        codex_base_url="${NEW_API_BASE_URL:-http://192.168.8.228:3000}"
-        codex_base_url="${codex_base_url%/}"
-        case "${codex_base_url}" in
-            */v1) : ;;
-            *) codex_base_url="${codex_base_url}/v1" ;;
-        esac
+        codex_provider="deepseek"
+        codex_direct_url="https://api.deepseek.com/"
+        codex_direct_token="${DEEPSEEK_TOKEN}"
+    fi
+
+    # 桥接就绪时改走 CLIProxyAPI（responses -> chat/completions 转换），否则直连
+    local codex_url="${codex_direct_url}" codex_token="${codex_direct_token}"
+    if [ -n "${CODEX_BRIDGE_URL:-}" ]; then
+        codex_url="${CODEX_BRIDGE_URL}"
+        codex_token="${CLIPROXY_API_KEY}"
     fi
 
     cat > /home/ubuntu/.codex/config.toml << CODEX_CONFIG_TOML
 model = "deepseek-v4-flash"
-model_provider = "newapi"
+model_provider = "${codex_provider}"
 preferred_auth_method = "apikey"
 forced_login_method = "api"
 model_reasoning_effort = "high"
@@ -287,14 +413,19 @@ model_catalog_json = "~/.codex/models.json"
 # 因网关只接受 function 工具，需关闭 Codex 默认开启的 web_search
 web_search = "disabled"
 
-[model_providers.newapi]
-name = "newapi"
-base_url = "${codex_base_url}"
+[model_providers.${codex_provider}]
+name = "${codex_provider}"
+base_url = "${codex_url}"
 wire_api = "responses"
-experimental_bearer_token = "${NEW_API_TOKEN}"
+experimental_bearer_token = "${codex_token}"
 CODEX_CONFIG_TOML
 
-    echo "Codex ready (model: deepseek-v4-flash, base_url: ${codex_base_url}, responses filter: ${CODEX_FILTER_URL:-off})."
+    if [ -n "${CODEX_BRIDGE_URL:-}" ]; then
+        echo "Codex ready via CLIProxyAPI bridge (model: deepseek-v4-flash, ${codex_provider} -> ${codex_url}, wire_api: responses)."
+    else
+        echo "Codex ready with direct ${codex_provider} integration (model: deepseek-v4-flash, direct: ${codex_url}, wire_api: responses)."
+    fi
+
     chmod 600 /home/ubuntu/.codex/config.toml 2>/dev/null || true
 }
 setup_codex_official

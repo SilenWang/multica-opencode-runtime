@@ -8,6 +8,7 @@
 - [构建与启动](#构建与启动)
 - [首次配置](#首次配置)
 - [Agent 与 API 接入](#agent-与-api-接入)
+- [CLIProxyAPI 桥接](#codex-长会话稳定性)
 - [插件](#插件)
 - [浏览器（ego-browser）](#浏览器ego-browser)
 - [数据持久化](#数据持久化)
@@ -28,6 +29,7 @@
 | multica | 0.4.43 | `pixi global`（channel `https://prefix.dev/sylens`） | Runtime 本体：自动登录并启动 daemon |
 | opencode | 1.18.30 | `pixi global`（同上 channel） | |
 | Codex CLI | 0.154.0 | `npm -g @openai/codex` | |
+| CLIProxyAPI | 7.2.146 | GitHub Release 固定版本 + SHA256 校验 → `/usr/local/bin/cliproxyapi` | Codex responses → chat/completions 协议桥接 |
 | Reasonix | 最新 | `npm -g reasonix` | 容器内 bash 沙箱依赖 `bubblewrap`（见 [Reasonix](#reasonix) 章节） |
 | gt (Gitea CLI) | 2.0.0 | dl.gitea.com 固定版本 + SHA256 校验，装到 `/usr/local/bin/gt` | Gitea 官方新一代命令行工具（取代 tea）；未预置登录，用 `gt auth login` 认证 |
 | ponytail | v4.9.0 | `git clone --depth 1 --branch v4.9.0` → `/opt/ponytail` | 仅 Codex 的插件，默认关闭 |
@@ -149,11 +151,16 @@ codex -m kimi-k3                  # 换用 Kimi K3
 codex -i screenshot.png           # deepseek 两个模型都声明了图片输入能力
 ```
 
-Codex 默认**直连** New-API 的 `/v1/responses`。上游不接受的 item（如
-`custom_tool_call`）由**网关侧**处理：commandcode 渠道 → 参数覆盖里的
-`prune_objects` 删除 `custom_tool_call` / `custom_tool_call_output`。容器内仍保留
-兼容代理，但默认关闭，仅作回滚手段（`CODEX_FILTER=on` 才启动）。部署顺序、前提
-与回滚见 [Codex 长会话稳定性](#codex-长会话稳定性)。
+Codex 默认经容器内的 **CLIProxyAPI 桥接**连接上游：
+
+```
+codex ──responses──> 127.0.0.1:8317 (CLIProxyAPI) ──chat/completions──> 上游
+```
+
+桥接把 responses 协议整体转成 chat/completions，天然不会出现 `custom_tool_call`
+这类上游不认的 item；模型映射启动时从 `$NEW_API_BASE_URL/v1/models` 动态生成，
+端点失败回退内置默认列表。桥接未启用/未就绪时自动回退直连上游。原因、开关与
+回滚见 [Codex 长会话稳定性](#codex-长会话稳定性)。
 
 Codex 只支持 `responses` 协议，所以未配置 `NEW_API_TOKEN` 时不会生成 Codex 配置；
 DeepSeek 官方（只有 `chat/completions`）仍可供 Reasonix / opencode 使用。
@@ -183,7 +190,7 @@ code: unsupported_input_item  (HTTP 400, url: $NEW_API_BASE_URL/v1/responses)
    切换或响应存储过期后无法解析，于是 400 `unsupported_input_item`；
    Codex 对该错误不降级重试（`will_retry=false`），任务直接失败。
 4. 用失败会话 rollout 里的原始 `custom_tool_call` 回放可直接复现同样的 400；把同一
-   item 改写成 `function_call` 后返回 200（见 `scripts/test-codex-responses-filter.mjs`）。
+   item 改写成 `function_call` 后返回 200（item 级代理曾验证此路径，随本次回退删除）。
 5. 同一错误也可能来自其它非白名单 item：Codex 的 `ResponseItem` 还包含
    `local_shell_call`、`compaction` / `context_compaction`（`remote_compaction_v2`
    压缩产物，只有加密内容，跨上游无法解密）、`web_search_call`、
@@ -196,61 +203,51 @@ code: unsupported_input_item  (HTTP 400, url: $NEW_API_BASE_URL/v1/responses)
    模式，这类引用就依赖服务端 stored response；New-API 侧 `store=false` 且
    `previous_response_id` 恒 400，因此代理必须能自行展开。
 
-**默认方案：网关侧过滤（commandcode 渠道参数覆盖）**
+**默认方案：CLIProxyAPI 桥接（本次恢复）**
 
-`commandcode` 渠道已配置参数覆盖（同一份真实历史实测 400→200，`input_tokens`
-从 571 降到基线 31）：
+容器启动时 `setup_cliproxyapi` 在 `127.0.0.1:8317` 拉起 CLIProxyAPI，把 Codex 的
+responses 请求翻译成 chat/completions 再转发上游：
 
-```json
-{"operations":[
-  {"path":"input","mode":"prune_objects","value":{"type":"custom_tool_call"}},
-  {"path":"input","mode":"prune_objects","value":{"type":"custom_tool_call_output"}}
-]}
-```
+- 协议层面就没有 `custom_tool_call` 这类 item，因此不会触发
+  `unsupported_input_item`；网关侧的 `prune_objects` 匹配不到东西，可保留或清空。
+- **模型映射不写死**：优先 `CLIPROXY_MODELS`；否则请求
+  `$NEW_API_BASE_URL/v1/models` 动态生成；端点失败/空返回时回退内置默认
+  （`scripts/cliproxy-models.mjs`，有单测）。上游加/换模型只需**重启容器**，
+  不用重建镜像。
+- 上游优先级与直连一致：有 `NEW_API_TOKEN` 走 New-API，否则用 `DEEPSEEK_TOKEN`
+  直连 DeepSeek 官方（桥接后 responses 也能用）。
+- 注意：Codex 侧仍按 `~/.codex/models.json` 选择模型；动态发现只影响桥接的转发
+  映射，新增模型要在 catalog 里补条目（上下文窗口/能力需人工确认）才能直接选用。
 
-- 前提：该渠道**不能**开启「透传请求体（Pass Through Body）」，否则参数覆盖不生效。
-- 语义：这是**删除**而不是翻译，`apply_patch` 这几步会从 Codex 的回放历史中消失
-  （请求不再失败，但模型丢这段上下文）。若要保留语义，可把该渠道的
-  `/v1/responses` 路由改成 responses→chat 转换（高级自定义渠道），属协议降级方案。
+**回滚**
 
-**部署顺序**：先在网关确认 commandcode 的参数覆盖已生效（同一历史 400→200，或
-token 探针降到基线），**再**切换/重建使用本镜像的 runtime。镜像侧 `CODEX_FILTER`
-默认 `off`，未确认网关前不要依赖本镜像的默认值。
+| 目标 | 做法 |
+| --- | --- |
+| 直连 + 网关 `prune_objects`（SIL-1033 中途方案） | `CLIPROXY_BRIDGE=off` 重启容器；网关参数覆盖保留 |
+| 恢复桥接（默认） | 删除/置空 `CLIPROXY_BRIDGE`（默认 `auto`）并重启 |
+| 完全无 400 且不跑桥接 | 直连 + 网关过滤（上一行）；该路径实测 400→200，但会丢 `apply_patch` 历史 |
 
-**回滚**：
-
-1. 容器侧：设 `CODEX_FILTER=on` 并重启容器，恢复容器内兼容代理；
-2. 网关侧：清空 commandcode 渠道的参数覆盖。
-
-两步都做才完全回到旧行为；只做容器侧时网关仍会删历史，但请求不会失败。
-
-**容器内代理（回滚手段，`CODEX_FILTER=on`）**：`entrypoint.sh` 启动
-`scripts/codex-responses-filter.mjs`：
-
-- **白名单降级**：`custom_tool_call`(`_output`) → `function_call`(`_output`)；
-  `local_shell_call` → `function_call`；压缩/搜索/图片/未知类型 → 占位 message；
-  转换后的 item 去掉依赖服务端存储的 `id`。
-- **本地 transcript 重建**：代理按请求头 `session-id` 分会话，缓存每个
-  `response.completed` 的 output（response id → output、item id → item，落盘
-  JSONL）。请求带 `previous_response_id` 时用缓存的 output 拼回完整 input 并删掉
-  该字段；带 `item_reference` 时展开成完整 item。缓存缺失时：`previous_response_id`
-  直接删字段、`item_reference` 换成占位 message，两者都不让请求因引用失效而 400
-  （前者会静默丢失该段上下文）。
-
-相关开关：
+**变量**
 
 | 变量 | 默认 | 说明 |
 | --- | --- | --- |
-| `CODEX_FILTER` | `off` | `on` 时启用容器内兼容代理（回滚手段）；默认由网关侧 prune_objects 处理 |
-| `CODEX_FILTER_PORT` | `8321` | 代理端口（仅绑 `127.0.0.1`，仅 `=on` 时使用） |
-| `CODEX_FILTER_STATE` | `~/.codex/responses-filter-state.jsonl` | transcript 落盘位置；容器重建后旧会话的引用仍可展开 |
+| `CLIPROXY_BRIDGE` | `auto` | `auto` 按上游决定 / `on` 强制 / `off` 禁用并直连（回滚） |
+| `CLIPROXY_PORT` | `8317` | 桥接监听端口（仅 `127.0.0.1`） |
+| `CLIPROXY_HOME` | `/home/ubuntu/.cli-proxy-api` | 配置、auth、日志、pid |
+| `CLIPROXY_API_KEY` | 自动生成 | 桥接访问 key（持久化在 `$CLIPROXY_HOME/api_key`） |
+| `CLIPROXY_MODELS` | 动态发现 / 内置默认 | `上游名:别名,...`；设置后不再自动发现 |
 
-排查：`tail -f /tmp/codex-responses-filter.log`（仅 `=on` 时存在；改写会打印
-`session=… rewrote N item(s), expanded M`）。
+排查：
 
-> 未覆盖：若本地 transcript 也缺失（换容器且状态未持久化），展开会降级为占位
-> message —— 请求不会失败，但该段上下文会丢失，需重跑相关步骤。此外 Codex CLI
-> 在 Dockerfile 里未固定版本（构建时取 npm 最新），行为可能随版本变化。
+```bash
+tail -f ~/.cli-proxy-api/logs/cliproxyapi.log   # 桥接自身
+tail -f ~/.cli-proxy-api/logs/models.log        # 模型发现结果（discovered / fallback）
+```
+
+> 历史：`73d9f3b` 曾移除桥接改直连，之后出现 `unsupported_input_item`；按最终方向
+> 本仓库恢复桥接，并回退了 item 级代理链（`27f8c2b` / `34e977d` / `de3102a`，A 组）。
+> B 组（`gt`、`GH_TOKEN`、Reasonix/opencode 模型）与其它无关改动未处理。
+> Codex CLI 在 Dockerfile 里仍未固定版本（构建时取 npm 最新），行为可能随版本变化。
 
 ### Reasonix
 
