@@ -175,47 +175,45 @@ if [ -n "$NEW_API_TOKEN" ]; then
 OPENCODE_JSON
 fi
 
-# 4. Codex responses 请求清洗代理（SIL-1033）
+# 4. Codex responses 兼容代理（默认关闭；网关侧已接管）
 #
-# Codex 0.171 会用全量历史回放会话，apply_patch 这类 freeform 工具产生的
-# `custom_tool_call` / `custom_tool_call_output` item 会留在历史里。New-API 的
-# responses 通道是无状态的（store 被强制为 false，previous_response_id 一律
-# 400），只能靠上游保存过的 response 解析这类 item；会话间隔过长、channel
-# 切换或上游存储过期后，就会返回
-#   "Item references need stored responses, which are not kept"
-# （code=unsupported_input_item），而 Codex 不会降级重试，任务直接失败。
+# 默认部署走 New-API 网关侧过滤：commandcode 渠道的「参数覆盖」用 prune_objects
+# 删除 custom_tool_call / custom_tool_call_output（同一份真实历史实测 400→200，
+# input_tokens 从 571 降到基线 31），runtime 不再需要本地代理。
 #
-# 同一错误也可能来自其它非白名单 item（local_shell_call、远程压缩产生的
-# compaction/context_compaction、web_search_call 等），或来自
-# previous_response_id / item_reference 这类需要服务端 stored response 的引用。
-# 因此代理做两件事：
+# 下面的代理保留为回滚手段（默认 off，显式 CODEX_FILTER=on 才启动）：
+# Codex 0.171 全量回放历史时，若上游仍拒绝白名单外的 item（custom_tool_call、
+# local_shell_call、compaction/context_compaction 等），或请求带
+# previous_response_id / item_reference 而网关无 stored response，代理会：
 #   1) 用本地 transcript（缓存的 response output）展开 previous_response_id 与
 #      item_reference；缓存缺失时安全降级（删字段/换成占位 message），不让请求 400；
 #   2) 把白名单（message/reasoning/function_call/function_call_output）之外的
 #      item 降级成 function 或占位 message。
 # 其余请求、SSE 响应与错误全部原样透传；代理起不来时回退直连，不阻塞启动。
 #
-# 开关 CODEX_FILTER：on（默认）/ off；端口 CODEX_FILTER_PORT（默认 8321）；
+# 开关 CODEX_FILTER：off（默认）/ on（回滚）；端口 CODEX_FILTER_PORT（默认 8321）；
 # transcript 落盘 CODEX_FILTER_STATE（默认 ~/.codex/responses-filter-state.jsonl）。
 CODEX_FILTER_URL=""
 setup_codex_responses_filter() {
     CODEX_FILTER_PORT="${CODEX_FILTER_PORT:-8321}"
-    if [ "${CODEX_FILTER:-on}" != "on" ]; then
-        echo "Codex responses filter disabled (CODEX_FILTER=${CODEX_FILTER})."
+    if [ "${CODEX_FILTER:-off}" != "on" ]; then
+        echo "Codex responses filter disabled (CODEX_FILTER=${CODEX_FILTER:-off}; gateway-side prune_objects is the default)."
         return
     fi
     if [ -z "${NEW_API_TOKEN:-}" ]; then
         return
     fi
-    if ! command -v node > /dev/null 2>&1 || [ ! -f /codex-responses-filter.mjs ]; then
-        echo "WARNING: node or /codex-responses-filter.mjs missing; Codex connects to New-API directly."
+    local filter_script="${CODEX_FILTER_SCRIPT:-/codex-responses-filter.mjs}"
+    local filter_pidfile="${CODEX_FILTER_PIDFILE:-/tmp/codex-responses-filter.pid}"
+    if ! command -v node > /dev/null 2>&1 || [ ! -f "${filter_script}" ]; then
+        echo "WARNING: node or ${filter_script} missing; Codex connects to New-API directly."
         return
     fi
 
     # 容器重启时清掉可能残留的旧实例
-    if [ -f /tmp/codex-responses-filter.pid ]; then
-        kill "$(cat /tmp/codex-responses-filter.pid)" 2>/dev/null || true
-        rm -f /tmp/codex-responses-filter.pid
+    if [ -f "${filter_pidfile}" ]; then
+        kill "$(cat "${filter_pidfile}")" 2>/dev/null || true
+        rm -f "${filter_pidfile}"
         sleep 1
     fi
 
@@ -227,22 +225,22 @@ setup_codex_responses_filter() {
     CODEX_FILTER_UPSTREAM="${NEW_API_BASE_URL:-http://192.168.8.228:3000}" \
     CODEX_FILTER_TOKEN="${NEW_API_TOKEN}" \
     CODEX_FILTER_STATE="${filter_state}" \
-        nohup node /codex-responses-filter.mjs >> "${filter_log}" 2>&1 &
-    echo $! > /tmp/codex-responses-filter.pid
+        nohup node "${filter_script}" >> "${filter_log}" 2>&1 &
+    echo $! > "${filter_pidfile}"
 
     local i
     for i in $(seq 1 20); do
         if curl -fsS --max-time 2 "http://127.0.0.1:${CODEX_FILTER_PORT}/healthz" > /dev/null 2>&1; then
             CODEX_FILTER_URL="http://127.0.0.1:${CODEX_FILTER_PORT}/v1"
-            echo "Codex responses filter ready (pid $(cat /tmp/codex-responses-filter.pid), log ${filter_log})."
+            echo "Codex responses filter ready (pid $(cat "${filter_pidfile}"), log ${filter_log})."
             return
         fi
         sleep 1
     done
 
     echo "WARNING: Codex responses filter did not become ready in 20s; see ${filter_log}. Codex connects to New-API directly."
-    kill "$(cat /tmp/codex-responses-filter.pid)" 2>/dev/null || true
-    rm -f /tmp/codex-responses-filter.pid
+    kill "$(cat "${filter_pidfile}")" 2>/dev/null || true
+    rm -f "${filter_pidfile}"
 }
 setup_codex_responses_filter
 

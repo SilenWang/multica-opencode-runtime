@@ -149,18 +149,11 @@ codex -m kimi-k3                  # 换用 Kimi K3
 codex -i screenshot.png           # deepseek 两个模型都声明了图片输入能力
 ```
 
-Codex 经本机的**请求清洗代理**连接 New-API 的 `/v1/responses`（默认
-`127.0.0.1:8321`）：
-
-```
-codex ──responses──> 127.0.0.1:8321 (codex-responses-filter) ──responses──> New-API
-```
-
-代理不做协议转换，只做两件兼容改写：把上游白名单（message / reasoning /
-function_call / function_call_output）之外的 item 降级成等价形态；并在请求携带
-`previous_response_id` / `item_reference` 时用本地 transcript 展开成完整 item。
-其余请求、SSE 响应与错误原样透传；代理起不来时自动回退直连。原因见
-[Codex 长会话稳定性](#codex-长会话稳定性)。
+Codex 默认**直连** New-API 的 `/v1/responses`。上游不接受的 item（如
+`custom_tool_call`）由**网关侧**处理：commandcode 渠道 → 参数覆盖里的
+`prune_objects` 删除 `custom_tool_call` / `custom_tool_call_output`。容器内仍保留
+兼容代理，但默认关闭，仅作回滚手段（`CODEX_FILTER=on` 才启动）。部署顺序、前提
+与回滚见 [Codex 长会话稳定性](#codex-长会话稳定性)。
 
 Codex 只支持 `responses` 协议，所以未配置 `NEW_API_TOKEN` 时不会生成 Codex 配置；
 DeepSeek 官方（只有 `chat/completions`）仍可供 Reasonix / opencode 使用。
@@ -203,8 +196,35 @@ code: unsupported_input_item  (HTTP 400, url: $NEW_API_BASE_URL/v1/responses)
    模式，这类引用就依赖服务端 stored response；New-API 侧 `store=false` 且
    `previous_response_id` 恒 400，因此代理必须能自行展开。
 
-因此容器不恢复完整的 CLIProxyAPI（那是重量级第三方协议转换，且曾需要
-`disable-cooling` 来规避单凭据冷却导致的 503），而是在 `entrypoint.sh` 里启动
+**默认方案：网关侧过滤（commandcode 渠道参数覆盖）**
+
+`commandcode` 渠道已配置参数覆盖（同一份真实历史实测 400→200，`input_tokens`
+从 571 降到基线 31）：
+
+```json
+{"operations":[
+  {"path":"input","mode":"prune_objects","value":{"type":"custom_tool_call"}},
+  {"path":"input","mode":"prune_objects","value":{"type":"custom_tool_call_output"}}
+]}
+```
+
+- 前提：该渠道**不能**开启「透传请求体（Pass Through Body）」，否则参数覆盖不生效。
+- 语义：这是**删除**而不是翻译，`apply_patch` 这几步会从 Codex 的回放历史中消失
+  （请求不再失败，但模型丢这段上下文）。若要保留语义，可把该渠道的
+  `/v1/responses` 路由改成 responses→chat 转换（高级自定义渠道），属协议降级方案。
+
+**部署顺序**：先在网关确认 commandcode 的参数覆盖已生效（同一历史 400→200，或
+token 探针降到基线），**再**切换/重建使用本镜像的 runtime。镜像侧 `CODEX_FILTER`
+默认 `off`，未确认网关前不要依赖本镜像的默认值。
+
+**回滚**：
+
+1. 容器侧：设 `CODEX_FILTER=on` 并重启容器，恢复容器内兼容代理；
+2. 网关侧：清空 commandcode 渠道的参数覆盖。
+
+两步都做才完全回到旧行为；只做容器侧时网关仍会删历史，但请求不会失败。
+
+**容器内代理（回滚手段，`CODEX_FILTER=on`）**：`entrypoint.sh` 启动
 `scripts/codex-responses-filter.mjs`：
 
 - **白名单降级**：`custom_tool_call`(`_output`) → `function_call`(`_output`)；
@@ -220,11 +240,11 @@ code: unsupported_input_item  (HTTP 400, url: $NEW_API_BASE_URL/v1/responses)
 
 | 变量 | 默认 | 说明 |
 | --- | --- | --- |
-| `CODEX_FILTER` | `on` | `off` 时关闭代理、直连 New-API（旧行为，长会话仍可能失败） |
-| `CODEX_FILTER_PORT` | `8321` | 代理端口（仅绑 `127.0.0.1`） |
+| `CODEX_FILTER` | `off` | `on` 时启用容器内兼容代理（回滚手段）；默认由网关侧 prune_objects 处理 |
+| `CODEX_FILTER_PORT` | `8321` | 代理端口（仅绑 `127.0.0.1`，仅 `=on` 时使用） |
 | `CODEX_FILTER_STATE` | `~/.codex/responses-filter-state.jsonl` | transcript 落盘位置；容器重建后旧会话的引用仍可展开 |
 
-排查：`tail -f /tmp/codex-responses-filter.log`（改写会打印
+排查：`tail -f /tmp/codex-responses-filter.log`（仅 `=on` 时存在；改写会打印
 `session=… rewrote N item(s), expanded M`）。
 
 > 未覆盖：若本地 transcript 也缺失（换容器且状态未持久化），展开会降级为占位
