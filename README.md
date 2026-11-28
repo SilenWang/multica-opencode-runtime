@@ -233,8 +233,9 @@ token 探针降到基线），**再**切换/重建使用本镜像的 runtime。�
 - **本地 transcript 重建**：代理按请求头 `session-id` 分会话，缓存每个
   `response.completed` 的 output（response id → output、item id → item，落盘
   JSONL）。请求带 `previous_response_id` 时用缓存的 output 拼回完整 input 并删掉
-  该字段；带 `item_reference` 时展开成完整 item；缓存缺失时用占位 message 降级，
-  绝不让请求因引用失效而 400。
+  该字段；带 `item_reference` 时展开成完整 item。缓存缺失时：`previous_response_id`
+  直接删字段、`item_reference` 换成占位 message，两者都不让请求因引用失效而 400
+  （前者会静默丢失该段上下文）。
 
 相关开关：
 
