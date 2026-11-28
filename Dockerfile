@@ -63,6 +63,36 @@ ARG PONYTAIL_VERSION=v4.9.0
 RUN git clone --depth 1 --branch ${PONYTAIL_VERSION} \
         https://github.com/DietrichGebert/ponytail.git /opt/ponytail
 
+# CLIProxyAPI：协议转换网关，把 Codex 的 OpenAI `responses` 协议翻译成上游
+# （new-api / DeepSeek 官方）的 `chat/completions`。容器启动时由 entrypoint 在
+# 127.0.0.1 拉起（见 scripts/entrypoint.sh 的 setup_cliproxyapi）。
+# 官方安装途径（https://help.router-for.me/introduction/quick-start.html）里的
+# 一键脚本会做交互式 systemd 配置、且安装在 sudo 需要密码的 /opt 下，不适用于
+# 无人值守的容器构建，因此走同一发布物的固定版本 + SHA256 校验安装。
+# 升级时 VERSION 与下面两个 checksum 必须一起改。
+ENV CLI_PROXY_API_VERSION=7.2.146
+RUN set -eux; \
+    case "$(dpkg --print-architecture)" in \
+        amd64) \
+            asset="linux_amd64"; \
+            sha="43e112686b4a5b7b818531144cd695eeaacdd54c46dced87be6fb3967c22e149" ;; \
+        arm64) \
+            asset="linux_aarch64"; \
+            sha="086ae6513aa522bbd1000f4e83e5b5223df6038bd69f1c6cad56619b84c06947" ;; \
+        *) \
+            echo "CLIProxyAPI: unsupported architecture $(dpkg --print-architecture)" >&2; \
+            exit 1 ;; \
+    esac; \
+    curl -fsSL --connect-timeout 10 --max-time 300 \
+        "https://github.com/router-for-me/CLIProxyAPI/releases/download/v${CLI_PROXY_API_VERSION}/CLIProxyAPI_${CLI_PROXY_API_VERSION}_${asset}.tar.gz" \
+        -o /tmp/cli-proxy-api.tar.gz; \
+    echo "${sha}  /tmp/cli-proxy-api.tar.gz" | sha256sum -c -; \
+    mkdir -p /tmp/cli-proxy-api; \
+    tar -xzf /tmp/cli-proxy-api.tar.gz -C /tmp/cli-proxy-api; \
+    install -m 0755 /tmp/cli-proxy-api/cli-proxy-api /usr/local/bin/cliproxyapi; \
+    rm -rf /tmp/cli-proxy-api /tmp/cli-proxy-api.tar.gz; \
+    cliproxyapi --help 2>&1 | head -1
+
 # Gitea CLI（gt）：Gitea 官方新一代命令行工具（tea 已停止维护，gt 1.0 起取代它）。
 # 官方安装脚本会实时解析 latest release 再下载，构建不可复现；这里按发布物固定
 # 版本 + SHA256 校验安装，并支持 amd64 / arm64 双架构。
@@ -120,7 +150,7 @@ RUN curl -fsSL https://biomcp.org/install.sh -o /tmp/biomcp-install.sh \
 
 COPY scripts/entrypoint.sh /entrypoint.sh
 COPY scripts/codex-models.json /codex-models.json
-COPY scripts/codex-responses-filter.mjs /codex-responses-filter.mjs
+COPY scripts/cliproxy-models.mjs /cliproxy-models.mjs
 COPY scripts/codex-trust-plugin-hooks.mjs /codex-trust-plugin-hooks.mjs
 COPY scripts/opencode-mcp.mjs /opencode-mcp.mjs
 
